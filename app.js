@@ -1,538 +1,378 @@
 // =============================================================
-//  AI 智能摄影助手 — app.js v3.0
-//  功能：AI 场景分析 + 人像姿势引导 + 自动美颜 + 滤镜
+//  AI 摄影大师 — app.js v4.0
+//  基于摄影基础理论 + 计算机视觉的智能相机系统
 // =============================================================
 
-// ---------- 全局状态 ----------
+'use strict';
+
+// ===== 全局状态 =====
 const S = {
   stream: null, facingMode: 'user', flashMode: 'off',
-  currentMode: 'auto',
-  currentPose: 'stand',
-  aiReady: false, aiAnalyzing: false,
-  beauty: { smooth: 50, whiten: 40, eyes: 30, slim: 20 },
-  filter: 'none',   // none | warm | cool | vintage | cinematic |清新
-  compMode: 'none',
-  analysis: { subject: null, gender: null, age: null, scene: null, style: null },
-  models: { blazeface: null, mobilenet: null, poseDetector: null },
-  lastAnalysisTime: 0,
+  // 拍摄模式
+  shootMode: 'auto',   // auto | portrait | landscape | pro | video
+  // 专业参数
+  iso: 'auto', wb: 'auto', gridMode: 'off',
+  auxMode: 'none',      // none | histogram | level | zebra | peaking
+  evComp: 0,
+  // 视频
+  mediaRecorder: null, recordedChunks: [], isRecording: false, recordingStart: 0,
+  // AI
+  aiReady: false, analyzing: false, lastAnalysis: 0,
+  // 美颜/滤镜
+  beauty: { smooth: 50, whiten: 35, eyes: 20, slim: 15 },
+  filter: 'none',
+  // AI 分析结果
+  scene: { type: null, light: null, quality: null, comp: null, ev: 0, tint: null },
+  models: { blazeface: null, mobilenet: null },
 };
 
-// ---------- DOM ----------
+// ===== DOM =====
 const video      = document.getElementById('camera-preview');
 const overlayCV  = document.getElementById('overlay-canvas');
 const overlayCtx = overlayCV.getContext('2d');
-const poseCV     = document.getElementById('pose-overlay');
-const poseCtx    = poseCV.getContext('2d');
-const aiBadge    = document.getElementById('ai-badge');
-const aiIcon     = document.getElementById('ai-icon');
-const aiStatus   = document.getElementById('ai-status');
+const histCV     = document.getElementById('histogram-canvas');
+const histCtx    = histCV.getContext('2d');
+const levelEl    = document.getElementById('level-indicator');
+const levelBubble = document.getElementById('level-bubble');
+const focusRing  = document.getElementById('focus-ring');
+const aiTip      = document.getElementById('ai-tip');
 
-// ---------- 姿势引导数据（SVG 风格坐标） ----------
-const POSE_GUIDES = {
-  female: {
-    stand: {
-      label: '优雅站姿',
-      tip: '身体微微侧转，重心放在一条腿上，另一条腿自然弯曲',
-      svg: `<svg viewBox="0 0 200 400" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="100" cy="30" r="18" fill="none" stroke="#FF6B6B" stroke-width="3"/>
-        <line x1="100" y1="48" x2="100" y2="130" stroke="#4ECDC4" stroke-width="3" stroke-linecap="round"/>
-        <line x1="100" y1="70" x2="60" y2="100" stroke="#4ECDC4" stroke-width="3" stroke-linecap="round"/>
-        <line x1="100" y1="70" x2="140" y2="100" stroke="#4ECDC4" stroke-width="3" stroke-linecap="round"/>
-        <line x1="100" y1="130" x2="75" y2="220" stroke="#FFD93D" stroke-width="3" stroke-linecap="round"/>
-        <line x1="75" y1="220" x2="70" y2="320" stroke="#FFD93D" stroke-width="3" stroke-linecap="round"/>
-        <line x1="100" y1="130" x2="130" y2="210" stroke="#FFD93D" stroke-width="3" stroke-linecap="round"/>
-        <line x1="130" y1="210" x2="125" y2="320" stroke="#FFD93D" stroke-width="3" stroke-linecap="round"/>
-        <circle cx="100" cy="30" r="4" fill="#FF6B6B"/>
-        <circle cx="60" cy="100" r="4" fill="#4ECDC4"/><circle cx="140" cy="100" r="4" fill="#4ECDC4"/>
-        <circle cx="70" cy="320" r="4" fill="#FFD93D"/><circle cx="125" cy="320" r="4" fill="#FFD93D"/>
-        <text x="100" y="385" text-anchor="middle" fill="#fff" font-size="11">💡 重心在一只脚上</text>
-      </svg>`
-    },
-    sit: {
-      label: '自然坐姿',
-      tip: '双腿自然交叠，一只手撑在身侧，另一只手自然放置',
-      svg: `<svg viewBox="0 0 200 400" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="100" cy="30" r="18" fill="none" stroke="#FF6B6B" stroke-width="3"/>
-        <line x1="100" y1="48" x2="100" y2="130" stroke="#4ECDC4" stroke-width="3" stroke-linecap="round"/>
-        <line x1="100" y1="70" x2="55" y2="110" stroke="#4ECDC4" stroke-width="3" stroke-linecap="round"/>
-        <line x1="100" y1="70" x2="145" y2="105" stroke="#4ECDC4" stroke-width="3" stroke-linecap="round"/>
-        <line x1="100" y1="130" x2="75" y2="200" stroke="#FFD93D" stroke-width="3" stroke-linecap="round"/>
-        <line x1="75" y1="200" x2="140" y2="230" stroke="#FFD93D" stroke-width="3" stroke-linecap="round"/>
-        <line x1="140" y1="230" x2="160" y2="280" stroke="#FFD93D" stroke-width="3" stroke-linecap="round"/>
-        <line x1="100" y1="200" x2="50" y2="260" stroke="#FFD93D" stroke-width="3" stroke-linecap="round"/>
-        <circle cx="100" cy="30" r="4" fill="#FF6B6B"/>
-        <circle cx="55" cy="110" r="4" fill="#4ECDC4"/><circle cx="145" cy="105" r="4" fill="#4ECDC4"/>
-        <circle cx="160" cy="280" r="4" fill="#FFD93D"/><circle cx="50" cy="260" r="4" fill="#FFD93D"/>
-        <text x="100" y="310" text-anchor="middle" fill="#fff" font-size="11">💡 双腿自然交叠</text>
-      </svg>`
-    },
-    lean: {
-      label: '倚靠休闲',
-      tip: '一侧身体轻靠墙壁或物体，手臂自然垂放或搭在物体上',
-      svg: `<svg viewBox="0 0 200 400" xmlns="http://www.w3.org/2000/svg">
-        <line x1="160" y1="0" x2="160" y2="400" stroke="rgba(255,255,255,0.2)" stroke-width="2" stroke-dasharray="4"/>
-        <circle cx="100" cy="30" r="18" fill="none" stroke="#FF6B6B" stroke-width="3"/>
-        <line x1="100" y1="48" x2="100" y2="130" stroke="#4ECDC4" stroke-width="3" stroke-linecap="round"/>
-        <line x1="100" y1="70" x2="160" y2="90" stroke="#4ECDC4" stroke-width="3" stroke-linecap="round"/>
-        <line x1="100" y1="70" x2="60" y2="110" stroke="#4ECDC4" stroke-width="3" stroke-linecap="round"/>
-        <line x1="100" y1="130" x2="70" y2="210" stroke="#FFD93D" stroke-width="3" stroke-linecap="round"/>
-        <line x1="70" y1="210" x2="65" y2="320" stroke="#FFD93D" stroke-width="3" stroke-linecap="round"/>
-        <line x1="100" y1="130" x2="130" y2="200" stroke="#FFD93D" stroke-width="3" stroke-linecap="round"/>
-        <line x1="130" y1="200" x2="160" y2="290" stroke="#FFD93D" stroke-width="3" stroke-linecap="round"/>
-        <circle cx="100" cy="30" r="4" fill="#FF6B6B"/>
-        <circle cx="160" cy="90" r="4" fill="#4ECDC4"/><circle cx="60" cy="110" r="4" fill="#4ECDC4"/>
-        <text x="100" y="360" text-anchor="middle" fill="#fff" font-size="11">💡 靠墙身体微倾</text>
-      </svg>`
-    },
-    walk: {
-      label: '行走抓拍',
-      tip: '迈步瞬间抓拍，身体略微前倾，手臂自然摆动，表情生动',
-      svg: `<svg viewBox="0 0 200 400" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="100" cy="30" r="18" fill="none" stroke="#FF6B6B" stroke-width="3"/>
-        <line x1="100" y1="48" x2="95" y2="130" stroke="#4ECDC4" stroke-width="3" stroke-linecap="round"/>
-        <line x1="95" y1="70" x2="60" y2="100" stroke="#4ECDC4" stroke-width="3" stroke-linecap="round"/>
-        <line x1="95" y1="70" x2="130" y2="95" stroke="#4ECDC4" stroke-width="3" stroke-linecap="round"/>
-        <line x1="95" y1="130" x2="70" y2="220" stroke="#FFD93D" stroke-width="3" stroke-linecap="round"/>
-        <line x1="70" y1="220" x2="50" y2="320" stroke="#FFD93D" stroke-width="3" stroke-linecap="round"/>
-        <line x1="95" y1="130" x2="135" y2="210" stroke="#FFD93D" stroke-width="3" stroke-linecap="round"/>
-        <line x1="135" y1="210" x2="155" y2="280" stroke="#FFD93D" stroke-width="3" stroke-linecap="round"/>
-        <circle cx="100" cy="30" r="4" fill="#FF6B6B"/>
-        <circle cx="60" cy="100" r="4" fill="#4ECDC4"/><circle cx="130" cy="95" r="4" fill="#4ECDC4"/>
-        <circle cx="50" cy="320" r="4" fill="#FFD93D"/><circle cx="155" cy="280" r="4" fill="#FFD93D"/>
-        <text x="100" y="360" text-anchor="middle" fill="#fff" font-size="11">💡 迈步瞬间抓拍</text>
-      </svg>`
-    },
-    profile: {
-      label: '优雅侧颜',
-      tip: '侧身站立或坐着，脸微微侧转露出下颌线，眼神看向远方',
-      svg: `<svg viewBox="0 0 200 400" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="100" cy="30" r="18" fill="none" stroke="#FF6B6B" stroke-width="3"/>
-        <text x="70" y="25" fill="#FF6B6B" font-size="18">←</text>
-        <line x1="100" y1="48" x2="100" y2="130" stroke="#4ECDC4" stroke-width="3" stroke-linecap="round"/>
-        <line x1="100" y1="70" x2="60" y2="100" stroke="#4ECDC4" stroke-width="3" stroke-linecap="round"/>
-        <line x1="100" y1="70" x2="140" y2="105" stroke="#4ECDC4" stroke-width="3" stroke-linecap="round"/>
-        <line x1="100" y1="130" x2="75" y2="220" stroke="#FFD93D" stroke-width="3" stroke-linecap="round"/>
-        <line x1="75" y1="220" x2="70" y2="320" stroke="#FFD93D" stroke-width="3" stroke-linecap="round"/>
-        <line x1="100" y1="130" x2="130" y2="210" stroke="#FFD93D" stroke-width="3" stroke-linecap="round"/>
-        <line x1="130" y1="210" x2="125" y2="320" stroke="#FFD93D" stroke-width="3" stroke-linecap="round"/>
-        <circle cx="100" cy="30" r="4" fill="#FF6B6B"/>
-        <circle cx="60" cy="100" r="4" fill="#4ECDC4"/><circle cx="140" cy="105" r="4" fill="#4ECDC4"/>
-        <circle cx="70" cy="320" r="4" fill="#FFD93D"/><circle cx="125" cy="320" r="4" fill="#FFD93D"/>
-        <text x="100" y="365" text-anchor="middle" fill="#fff" font-size="11">💡 侧脸眼神看远方</text>
-      </svg>`
-    },
-  },
-  male: {
-    stand: {
-      label: '绅士站姿',
-      tip: '双脚分开与肩同宽，双手自然插袋或自然垂放，肩背挺直',
-      svg: `<svg viewBox="0 0 200 400" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="100" cy="30" r="18" fill="none" stroke="#FF6B6B" stroke-width="3"/>
-        <line x1="100" y1="48" x2="100" y2="130" stroke="#4ECDC4" stroke-width="3.5" stroke-linecap="round"/>
-        <line x1="100" y1="70" x2="65" y2="130" stroke="#4ECDC4" stroke-width="3.5" stroke-linecap="round"/>
-        <line x1="100" y1="70" x2="135" y2="130" stroke="#4ECDC4" stroke-width="3.5" stroke-linecap="round"/>
-        <line x1="100" y1="130" x2="75" y2="220" stroke="#FFD93D" stroke-width="3.5" stroke-linecap="round"/>
-        <line x1="75" y1="220" x2="68" y2="320" stroke="#FFD93D" stroke-width="3.5" stroke-linecap="round"/>
-        <line x1="100" y1="130" x2="125" y2="220" stroke="#FFD93D" stroke-width="3.5" stroke-linecap="round"/>
-        <line x1="125" y1="220" x2="132" y2="320" stroke="#FFD93D" stroke-width="3.5" stroke-linecap="round"/>
-        <circle cx="100" cy="30" r="4" fill="#FF6B6B"/>
-        <circle cx="65" cy="130" r="4" fill="#4ECDC4"/><circle cx="135" cy="130" r="4" fill="#4ECDC4"/>
-        <circle cx="68" cy="320" r="4" fill="#FFD93D"/><circle cx="132" cy="320" r="4" fill="#FFD93D"/>
-        <text x="100" y="375" text-anchor="middle" fill="#fff" font-size="11">💡 双脚与肩同宽</text>
-      </svg>`
-    },
-    sit: {
-      label: '商务坐姿',
-      tip: '坐椅前部，背部挺直，双腿自然分开，手放在膝盖上',
-      svg: `<svg viewBox="0 0 200 400" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="100" cy="30" r="18" fill="none" stroke="#FF6B6B" stroke-width="3"/>
-        <line x1="100" y1="48" x2="100" y2="130" stroke="#4ECDC4" stroke-width="3.5" stroke-linecap="round"/>
-        <line x1="100" y1="70" x2="60" y2="115" stroke="#4ECDC4" stroke-width="3.5" stroke-linecap="round"/>
-        <line x1="100" y1="70" x2="140" y2="115" stroke="#4ECDC4" stroke-width="3.5" stroke-linecap="round"/>
-        <line x1="100" y1="130" x2="75" y2="200" stroke="#FFD93D" stroke-width="3.5" stroke-linecap="round"/>
-        <line x1="75" y1="200" x2="60" y2="280" stroke="#FFD93D" stroke-width="3.5" stroke-linecap="round"/>
-        <line x1="100" y1="130" x2="125" y2="200" stroke="#FFD93D" stroke-width="3.5" stroke-linecap="round"/>
-        <line x1="125" y1="200" x2="140" y2="280" stroke="#FFD93D" stroke-width="3.5" stroke-linecap="round"/>
-        <circle cx="100" cy="30" r="4" fill="#FF6B6B"/>
-        <circle cx="60" cy="115" r="4" fill="#4ECDC4"/><circle cx="140" cy="115" r="4" fill="#4ECDC4"/>
-        <circle cx="60" cy="280" r="4" fill="#FFD93D"/><circle cx="140" cy="280" r="4" fill="#FFD93D"/>
-        <text x="100" y="315" text-anchor="middle" fill="#fff" font-size="11">💡 背部挺直</text>
-      </svg>`
-    },
-    lean: {
-      label: '放松倚靠',
-      tip: '身体重心靠墙，手臂交叉或插袋，表情放松自然',
-      svg: `<svg viewBox="0 0 200 400" xmlns="http://www.w3.org/2000/svg">
-        <line x1="165" y1="0" x2="165" y2="400" stroke="rgba(255,255,255,0.2)" stroke-width="2" stroke-dasharray="4"/>
-        <circle cx="100" cy="30" r="18" fill="none" stroke="#FF6B6B" stroke-width="3"/>
-        <line x1="100" y1="48" x2="100" y2="130" stroke="#4ECDC4" stroke-width="3.5" stroke-linecap="round"/>
-        <line x1="100" y1="75" x2="165" y2="90" stroke="#4ECDC4" stroke-width="3.5" stroke-linecap="round"/>
-        <line x1="100" y1="75" x2="65" y2="125" stroke="#4ECDC4" stroke-width="3.5" stroke-linecap="round"/>
-        <line x1="100" y1="130" x2="70" y2="210" stroke="#FFD93D" stroke-width="3.5" stroke-linecap="round"/>
-        <line x1="70" y1="210" x2="60" y2="320" stroke="#FFD93D" stroke-width="3.5" stroke-linecap="round"/>
-        <line x1="100" y1="130" x2="130" y2="200" stroke="#FFD93D" stroke-width="3.5" stroke-linecap="round"/>
-        <line x1="130" y1="200" x2="165" y2="290" stroke="#FFD93D" stroke-width="3.5" stroke-linecap="round"/>
-        <circle cx="100" cy="30" r="4" fill="#FF6B6B"/>
-        <circle cx="165" cy="90" r="4" fill="#4ECDC4"/><circle cx="65" cy="125" r="4" fill="#4ECDC4"/>
-        <text x="100" y="350" text-anchor="middle" fill="#fff" font-size="11">💡 靠墙手臂交叉</text>
-      </svg>`
-    },
-    walk: {
-      label: '行走姿态',
-      tip: '走路中抓拍，一条腿支撑，另一条腿迈步，手臂自然摆动',
-      svg: `<svg viewBox="0 0 200 400" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="100" cy="30" r="18" fill="none" stroke="#FF6B6B" stroke-width="3"/>
-        <line x1="100" y1="48" x2="98" y2="130" stroke="#4ECDC4" stroke-width="3.5" stroke-linecap="round"/>
-        <line x1="98" y1="70" x2="62" y2="100" stroke="#4ECDC4" stroke-width="3.5" stroke-linecap="round"/>
-        <line x1="98" y1="70" x2="135" y2="95" stroke="#4ECDC4" stroke-width="3.5" stroke-linecap="round"/>
-        <line x1="98" y1="130" x2="68" y2="220" stroke="#FFD93D" stroke-width="3.5" stroke-linecap="round"/>
-        <line x1="68" y1="220" x2="52" y2="320" stroke="#FFD93D" stroke-width="3.5" stroke-linecap="round"/>
-        <line x1="98" y1="130" x2="138" y2="210" stroke="#FFD93D" stroke-width="3.5" stroke-linecap="round"/>
-        <line x1="138" y1="210" x2="155" y2="285" stroke="#FFD93D" stroke-width="3.5" stroke-linecap="round"/>
-        <circle cx="100" cy="30" r="4" fill="#FF6B6B"/>
-        <circle cx="62" cy="100" r="4" fill="#4ECDC4"/><circle cx="135" cy="95" r="4" fill="#4ECDC4"/>
-        <circle cx="52" cy="320" r="4" fill="#FFD93D"/><circle cx="155" cy="285" r="4" fill="#FFD93D"/>
-        <text x="100" y="360" text-anchor="middle" fill="#fff" font-size="11">💡 迈步瞬间抓拍</text>
-      </svg>`
-    },
-    profile: {
-      label: '硬朗侧颜',
-      tip: '侧身站立，下巴微抬，眼神犀利看向侧面光源方向',
-      svg: `<svg viewBox="0 0 200 400" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="100" cy="30" r="18" fill="none" stroke="#FF6B6B" stroke-width="3"/>
-        <text x="130" y="25" fill="#FF6B6B" font-size="18">→</text>
-        <line x1="100" y1="48" x2="100" y2="130" stroke="#4ECDC4" stroke-width="3.5" stroke-linecap="round"/>
-        <line x1="100" y1="70" x2="65" y2="125" stroke="#4ECDC4" stroke-width="3.5" stroke-linecap="round"/>
-        <line x1="100" y1="70" x2="135" y2="115" stroke="#4ECDC4" stroke-width="3.5" stroke-linecap="round"/>
-        <line x1="100" y1="130" x2="72" y2="220" stroke="#FFD93D" stroke-width="3.5" stroke-linecap="round"/>
-        <line x1="72" y1="220" x2="68" y2="320" stroke="#FFD93D" stroke-width="3.5" stroke-linecap="round"/>
-        <line x1="100" y1="130" x2="128" y2="220" stroke="#FFD93D" stroke-width="3.5" stroke-linecap="round"/>
-        <line x1="128" y1="220" x2="132" y2="320" stroke="#FFD93D" stroke-width="3.5" stroke-linecap="round"/>
-        <circle cx="100" cy="30" r="4" fill="#FF6B6B"/>
-        <circle cx="65" cy="125" r="4" fill="#4ECDC4"/><circle cx="135" cy="115" r="4" fill="#4ECDC4"/>
-        <circle cx="68" cy="320" r="4" fill="#FFD93D"/><circle cx="132" cy="320" r="4" fill="#FFD93D"/>
-        <text x="100" y="365" text-anchor="middle" fill="#fff" font-size="11">💡 下巴微抬眼神犀利</text>
-      </svg>`
-    },
-  },
-  child: {
-    stand: {
-      label: '活泼站姿',
-      tip: '孩子自然站立，可以踮脚、歪头、抬手比耶或双手张开',
-      svg: `<svg viewBox="0 0 200 400" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="100" cy="40" r="22" fill="none" stroke="#FF6B6B" stroke-width="3"/>
-        <line x1="100" y1="62" x2="100" y2="160" stroke="#4ECDC4" stroke-width="3" stroke-linecap="round"/>
-        <line x1="100" y1="85" x2="60" y2="60" stroke="#4ECDC4" stroke-width="3" stroke-linecap="round"/>
-        <line x1="100" y1="85" x2="145" y2="60" stroke="#4ECDC4" stroke-width="3" stroke-linecap="round"/>
-        <text x="55" y="55" fill="#FF6B6B" font-size="14">✌️</text>
-        <text x="140" y="55" fill="#FF6B6B" font-size="14">✌️</text>
-        <line x1="100" y1="160" x2="80" y2="260" stroke="#FFD93D" stroke-width="3" stroke-linecap="round"/>
-        <line x1="80" y1="260" x2="72" y2="340" stroke="#FFD93D" stroke-width="3" stroke-linecap="round"/>
-        <line x1="100" y1="160" x2="120" y2="260" stroke="#FFD93D" stroke-width="3" stroke-linecap="round"/>
-        <line x1="120" y1="260" x2="128" y2="340" stroke="#FFD93D" stroke-width="3" stroke-linecap="round"/>
-        <circle cx="100" cy="40" r="4" fill="#FF6B6B"/>
-        <circle cx="72" cy="340" r="4" fill="#FFD93D"/><circle cx="128" cy="340" r="4" fill="#FFD93D"/>
-        <text x="100" y="380" text-anchor="middle" fill="#fff" font-size="11">💡 可以踮脚/比耶</text>
-      </svg>`
-    },
-    sit: {
-      label: '萌趣坐姿',
-      tip: '盘腿坐或蹲坐，双手托腮或抱膝，表情活泼可爱',
-      svg: `<svg viewBox="0 0 200 400" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="100" cy="40" r="22" fill="none" stroke="#FF6B6B" stroke-width="3"/>
-        <line x1="100" y1="62" x2="100" y2="160" stroke="#4ECDC4" stroke-width="3" stroke-linecap="round"/>
-        <line x1="100" y1="90" x2="65" y2="125" stroke="#4ECDC4" stroke-width="3" stroke-linecap="round"/>
-        <line x1="65" y1="125" x2="85" y2="105" stroke="#4ECDC4" stroke-width="3" stroke-linecap="round"/>
-        <line x1="100" y1="90" x2="135" y2="125" stroke="#4ECDC4" stroke-width="3" stroke-linecap="round"/>
-        <line x1="135" y1="125" x2="115" y2="105" stroke="#4ECDC4" stroke-width="3" stroke-linecap="round"/>
-        <text x="75" y="100" fill="#FF6B6B" font-size="14">👋</text>
-        <line x1="100" y1="160" x2="60" y2="240" stroke="#FFD93D" stroke-width="3" stroke-linecap="round"/>
-        <line x1="60" y1="240" x2="100" y2="260" stroke="#FFD93D" stroke-width="3" stroke-linecap="round"/>
-        <line x1="100" y1="160" x2="140" y2="240" stroke="#FFD93D" stroke-width="3" stroke-linecap="round"/>
-        <line x1="140" y1="240" x2="100" y2="260" stroke="#FFD93D" stroke-width="3" stroke-linecap="round"/>
-        <circle cx="100" cy="40" r="4" fill="#FF6B6B"/>
-        <circle cx="100" cy="260" r="4" fill="#FFD93D"/>
-        <text x="100" y="295" text-anchor="middle" fill="#fff" font-size="11">💡 双手托腮</text>
-      </svg>`
-    },
-    lean: {
-      label: '可爱倚靠',
-      tip: '孩子靠在家具/墙上，歪头看镜头，笑得露出牙齿',
-      svg: `<svg viewBox="0 0 200 400" xmlns="http://www.w3.org/2000/svg">
-        <line x1="160" y1="0" x2="160" y2="400" stroke="rgba(255,255,255,0.2)" stroke-width="2" stroke-dasharray="4"/>
-        <circle cx="100" cy="40" r="22" fill="none" stroke="#FF6B6B" stroke-width="3"/>
-        <line x1="100" y1="62" x2="95" y2="160" stroke="#4ECDC4" stroke-width="3" stroke-linecap="round"/>
-        <line x1="95" y1="90" x2="160" y2="100" stroke="#4ECDC4" stroke-width="3" stroke-linecap="round"/>
-        <line x1="95" y1="90" x2="60" y2="130" stroke="#4ECDC4" stroke-width="3" stroke-linecap="round"/>
-        <line x1="95" y1="160" x2="65" y2="250" stroke="#FFD93D" stroke-width="3" stroke-linecap="round"/>
-        <line x1="65" y1="250" x2="55" y2="340" stroke="#FFD93D" stroke-width="3" stroke-linecap="round"/>
-        <line x1="95" y1="160" x2="125" y2="250" stroke="#FFD93D" stroke-width="3" stroke-linecap="round"/>
-        <line x1="125" y1="250" x2="115" y2="340" stroke="#FFD93D" stroke-width="3" stroke-linecap="round"/>
-        <text x="155" y="95" fill="#FF6B6B" font-size="14">😊</text>
-        <circle cx="100" cy="40" r="4" fill="#FF6B6B"/>
-        <text x="100" y="375" text-anchor="middle" fill="#fff" font-size="11">💡 歪头看镜头笑</text>
-      </svg>`
-    },
-    walk: {
-      label: '活力蹦跳',
-      tip: '蹦跳瞬间，双脚离地，手臂张开，表情夸张开心',
-      svg: `<svg viewBox="0 0 200 400" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="100" cy="35" r="22" fill="none" stroke="#FF6B6B" stroke-width="3"/>
-        <line x1="100" y1="57" x2="98" y2="150" stroke="#4ECDC4" stroke-width="3" stroke-linecap="round"/>
-        <line x1="98" y1="80" x2="50" y2="55" stroke="#4ECDC4" stroke-width="3" stroke-linecap="round"/>
-        <line x1="98" y1="80" x2="150" y2="55" stroke="#4ECDC4" stroke-width="3" stroke-linecap="round"/>
-        <text x="42" y="50" fill="#FF6B6B" font-size="14">⭐</text>
-        <text x="145" y="50" fill="#FF6B6B" font-size="14">⭐</text>
-        <line x1="98" y1="150" x2="65" y2="230" stroke="#FFD93D" stroke-width="3" stroke-linecap="round"/>
-        <line x1="65" y1="230" x2="55" y2="300" stroke="#FFD93D" stroke-width="3" stroke-linecap="round"/>
-        <line x1="98" y1="150" x2="135" y2="230" stroke="#FFD93D" stroke-width="3" stroke-linecap="round"/>
-        <line x1="135" y1="230" x2="145" y2="300" stroke="#FFD93D" stroke-width="3" stroke-linecap="round"/>
-        <circle cx="100" cy="35" r="4" fill="#FF6B6B"/>
-        <circle cx="55" cy="300" r="4" fill="#FFD93D"/><circle cx="145" cy="300" r="4" fill="#FFD93D"/>
-        <text x="100" y="340" text-anchor="middle" fill="#fff" font-size="11">💡 双脚离地更活泼</text>
-      </svg>`
-    },
-    profile: {
-      label: '可爱侧颜',
-      tip: '孩子侧脸，嘟嘴或微笑，看一侧的玩具或家长',
-      svg: `<svg viewBox="0 0 200 400" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="100" cy="40" r="22" fill="none" stroke="#FF6B6B" stroke-width="3"/>
-        <text x="70" y="32" fill="#FF6B6B" font-size="18">←</text>
-        <line x1="100" y1="62" x2="100" y2="160" stroke="#4ECDC4" stroke-width="3" stroke-linecap="round"/>
-        <line x1="100" y1="85" x2="65" y2="125" stroke="#4ECDC4" stroke-width="3" stroke-linecap="round"/>
-        <line x1="100" y1="85" x2="135" y2="120" stroke="#4ECDC4" stroke-width="3" stroke-linecap="round"/>
-        <line x1="100" y1="160" x2="75" y2="260" stroke="#FFD93D" stroke-width="3" stroke-linecap="round"/>
-        <line x1="75" y1="260" x2="68" y2="340" stroke="#FFD93D" stroke-width="3" stroke-linecap="round"/>
-        <line x1="100" y1="160" x2="125" y2="260" stroke="#FFD93D" stroke-width="3" stroke-linecap="round"/>
-        <line x1="125" y1="260" x2="132" y2="340" stroke="#FFD93D" stroke-width="3" stroke-linecap="round"/>
-        <circle cx="100" cy="40" r="4" fill="#FF6B6B"/>
-        <circle cx="68" cy="340" r="4" fill="#FFD93D"/><circle cx="132" cy="340" r="4" fill="#FFD93D"/>
-        <text x="100" y="375" text-anchor="middle" fill="#fff" font-size="11">💡 嘟嘴看一侧</text>
-      </svg>`
-    },
-  },
-};
-
-// 滤镜配置
+// ===== 滤镜配置 =====
 const FILTERS = {
-  none:      { label: '原图',     css: 'none',              cssColor: '#fff' },
-  warm:      { label: '暖色调',   css: 'sepia(0.25) saturate(1.3)', cssColor: '#FFB347' },
-  cool:      { label: '冷色调',   css: 'saturate(0.9) hue-rotate(20deg) brightness(1.05)', cssColor: '#87CEEB' },
-  vintage:   { label: '复古',     css: 'sepia(0.4) contrast(1.1) brightness(0.9)', cssColor: '#D4A574' },
-  cinematic: { label: '电影感',  css: 'contrast(1.15) saturate(1.2) brightness(0.92)', cssColor: '#7B8CDE' },
-  小清新:    { label: '小清新',  css: 'saturate(1.1) brightness(1.08) contrast(0.95)', cssColor: '#A8E6CF' },
+  none:      { label: '原图',     css: 'none' },
+  warm:      { label: '暖调',     css: 'sepia(0.2) saturate(1.3) brightness(1.03)' },
+  cool:      { label: '冷调',     css: 'saturate(0.9) hue-rotate(15deg) brightness(1.05)' },
+  vintage:   { label: '复古',     css: 'sepia(0.4) contrast(1.1) brightness(0.9) saturate(0.9)' },
+  cinematic: { label: '电影',    css: 'contrast(1.15) saturate(1.2) brightness(0.9)' },
+  小清新:    { label: '小清新',  css: 'saturate(1.05) brightness(1.08) contrast(0.95)' },
 };
 
-// 场景知识库
-const SCENE_MAP = {
-  beach:    { label: '🌊 海边/沙滩', color: '#4ECDC4', style: '小清新、浪漫、日系', comp: 'thirds' },
-  forest:   { label: '🌲 森林/树木', color: '#95D5B2', style: '森系、氧气感、自然', comp: 'thirds' },
-  mountain: { label: '🏔️ 山川/自然', color: '#D8B4F8', style: '大气、风光、史诗感', comp: 'golden' },
-  city:     { label: '🏙️ 城市/建筑', color: '#FFD6A5', style: '都市感、时尚、潮流', comp: 'diagonal' },
-  street:   { label: '🛤️ 街道/小路', color: '#FFB3C6', style: '街拍、文艺、复古', comp: 'thirds' },
-  water:    { label: '💧 湖泊/水面', color: '#00B4D8', style: '倒影、静谧、清冷', comp: 'center' },
-  park:     { label: '🌿 公园/草地', color: '#B7E4C7', style: '休闲、活力、春日感', comp: 'thirds' },
-  sky:      { label: '☁️ 天空/空旷', color: '#87CEEB', style: '极简、留白、高级感', comp: 'center' },
-  indoor:   { label: '🏠 室内环境', color: '#E8C39E', style: '日常、生活感、温馨', comp: 'thirds' },
-  default:  { label: '🏔️ 通用场景', color: '#ffffff', style: '通用百搭', comp: 'thirds' },
+// ===== 场景-参数映射（摄影基础理论）=====
+// 基于光圈/快门/ISO 联动原理 + 分区曝光法（Zone System）
+const SCENE_PARAMS = {
+  portrait: {
+    ev: 0, wb: 'auto', iso: 'auto', tint: '暖调偏柔',
+    advice: '使用大光圈虚化背景，让主体更突出',
+    grid: 'thirds',  // 主体放三分线交点
+    lightAdvice: '寻找柔和侧光，避免正午强光直照',
+  },
+  landscape: {
+    ev: 0, wb: 'auto', iso: 'auto', tint: '自然饱和',
+    advice: '收小光圈获得更大景深，让前景和背景都清晰',
+    grid: 'golden',   // 黄金分割
+    lightAdvice: '黄金时段（日出/日落）光线最佳',
+  },
+  night: {
+    ev: -1, wb: 'auto', iso: '800', tint: '冷蓝氛围',
+    advice: '稳定手机或使用支架，长曝光获得更多细节',
+    grid: 'center',
+    lightAdvice: '寻找人造光源点缀，避免纯黑场景',
+  },
+  backlit: {
+    ev: +1.5, wb: 'auto', iso: 'auto', tint: '高光优先',
+    advice: '增加曝光补偿或开启 HDR，避免主体过暗',
+    grid: 'thirds',
+    lightAdvice: '对主体脸部测光，或使用反光板补光',
+  },
+  macro: {
+    ev: 0, wb: 'auto', iso: 'auto', tint: '高饱和',
+    advice: '使用手动对焦，轻微调整获得锐利细节',
+    grid: 'center',
+    lightAdvice: '环形闪光灯或自然侧光，避免阴影覆盖主体',
+  },
+  indoor: {
+    ev: 0, wb: 'auto', iso: '400', tint: '暖调',
+    advice: '适当提高 ISO，避免快门过慢导致模糊',
+    grid: 'thirds',
+    lightAdvice: '靠近窗户，利用自然光拍摄效果更佳',
+  },
+  sports: {
+    ev: 0, wb: 'auto', iso: '800', tint: '高对比',
+    advice: '使用连拍模式，提高快门速度凝固瞬间',
+    grid: 'thirds',
+    lightAdvice: '连拍时保持稳定，跟随主体移动',
+  },
+  fireworks: {
+    ev: -2, wb: 'tungsten', iso: '200', tint: '冷蓝',
+    advice: '使用三脚架，长曝光（2-4秒）捕捉光轨',
+    grid: 'off',
+    lightAdvice: '烟花绽放瞬间按下快门',
+  },
+  cloud: {
+    ev: -0.5, wb: 'cloudy', iso: 'auto', tint: '低饱和灰调',
+    advice: '光线柔和均匀，适合人像和风景',
+    grid: 'thirds',
+    lightAdvice: '阴天光线适合人像，避免大平光',
+  },
+  sunny: {
+    ev: 0, wb: 'sunny', iso: '100', tint: '高饱和',
+    advice: '经典日光参数，阴影处有丰富的细节层次',
+    grid: 'golden',
+    lightAdvice: '注意强光下的人脸测光，可适当加曝光补偿',
+  },
 };
 
-// ========== 初始化 ==========
+// ===== 相机初始化 =====
 async function initCamera() {
   if (S.stream) S.stream.getTracks().forEach(t => t.stop());
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: S.facingMode, width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } },
-      audio: false,
-    });
-    video.srcObject = stream; S.stream = stream;
+    const constraints = {
+      video: {
+        facingMode: S.facingMode,
+        width:  { ideal: 1920 }, height: { ideal: 1080 },
+        frameRate: { ideal: 30 },
+      }, audio: false,
+    };
+    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    video.srcObject = S.stream = stream;
     await video.play();
-    resizeOverlays();
-  } catch (e) { alert('相机启动失败，请检查权限。'); }
+    resizeOverlay();
+  } catch (e) { alert('相机启动失败，请检查权限设置。'); }
 }
 
-function resizeOverlays() {
+function resizeOverlay() {
   const w = video.videoWidth || video.clientWidth;
   const h = video.videoHeight || video.clientHeight;
-  overlayCV.width = poseCV.width = w; overlayCV.height = poseCV.height = h;
+  overlayCV.width = w; overlayCV.height = h;
 }
 
-// ========== 加载 AI 模型 ==========
+// ===== AI 模型加载 =====
 async function loadModels() {
-  setAIState('loading', '加载模型…');
+  showTip('⏳ 加载 AI 模型中...');
   try {
-    const [bf, mn, pd] = await Promise.all([
+    const [bf, mn] = await Promise.all([
       blazeface.load(),
       mobilenet.load({ version: 2, alpha: 1.0 }),
-      poseDetection.createDetector(poseDetection.SupportedModels.MoveNet,
-        { modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING }),
     ]);
-    S.models.blazeface = bf; S.models.mobilenet = mn; S.models.poseDetector = pd;
+    S.models.blazeface = bf; S.models.mobilenet = mn;
     S.aiReady = true;
-    setAIState('idle', 'AI 就绪');
+    hideTip(); showTip('✅ AI 就绪', 1500);
   } catch (e) {
-    console.warn('AI模型加载失败，使用简化模式:', e);
     S.aiReady = false;
-    setAIState('error', '离线模式');
+    hideTip(); showTip('⚠️ AI 离线模式', 2500);
+    console.warn('模型加载失败:', e);
   }
 }
 
-function setAIState(state, text) {
-  aiBadge.className = 'ai-badge ' + (state === 'loading' ? 'analyzing' : state === 'error' ? 'error' : state === 'done' ? 'done' : 'idle');
-  aiIcon.textContent = state === 'error' ? '⚠️' : state === 'loading' ? '⏳' : state === 'done' ? '✅' : '🤖';
-  aiStatus.textContent = text;
-}
-
-// ========== AI 场景分析 ==========
+// ===== AI 场景分析（核心算法）=====
+// 基于摄影分区曝光法 + 环境光检测
 async function analyzeScene() {
-  if (!S.aiReady || !video.readyState >= 2 || S.aiAnalyzing) return;
+  if (!S.aiReady || !video.readyState >= 2 || S.analyzing) return;
   const now = Date.now();
-  if (now - S.lastAnalysisTime < 1000) return;
-  S.lastAnalysisTime = now;
-  S.aiAnalyzing = true;
-  setAIState('loading', 'AI 分析中…');
+  if (now - S.lastAnalysis < 1200) return;
+  S.lastAnalysis = now;
+  S.analyzing = true;
 
   try {
     const w = video.videoWidth, h = video.videoHeight;
-    if (!w || !h) { S.aiAnalyzing = false; return; }
+    if (!w || !h) { S.analyzing = false; return; }
 
-    // 人脸检测
+    // 1. 采样帧数据做亮度分析（摄影分区曝光法）
+    const lumSamples = sampleLuminance(video, 20);
+
+    // 2. 人脸检测
     const faces = await S.models.blazeface.estimateFaces(video, false);
 
     if (faces.length > 0) {
       // === 检测到人像 ===
       const face = faces[0];
-      const fw = (face.bottomRight[0] - face.topLeft[0]) / w;
-      const fh = (face.bottomRight[1] - face.topLeft[1]) / h;
-      const area = fw * fh;
+      const faceArea = ((face.bottomRight[0]-face.topLeft[0])/w)*((face.bottomRight[1]-face.topLeft[1])/h);
+      const faceRatio = (face.bottomRight[0]-face.topLeft[0])/(face.bottomRight[1]-face.topLeft[1]);
 
-      // 性别估算（脸宽高比）
-      const ratio = fw / fh;
-      const gender = ratio > 0.76 ? 'female' : 'male';
-      // 年龄估算
-      const age = area > 0.055 ? 'adult' : area > 0.02 ? 'young' : 'child';
+      // 基于亮度判断逆光
+      const backlit = lumSamples.contrast > 0.5 && faceArea < 0.04;
+      // 场景判断
+      const sceneType = backlit ? 'backlit' : 'portrait';
+      const gender = faceRatio > 0.76 ? '女性' : '男性';
 
-      S.analysis.gender = gender; S.analysis.age = age;
-      S.analysis.subject = '👤 人像';
+      S.scene = {
+        type: '👤 人像',
+        subject: `${gender}人像`,
+        light: analyzeLightCondition(lumSamples),
+        quality: analyzeExposureQuality(lumSamples),
+        comp: 'thirds',
+        ev: backlit ? 1.5 : 0,
+        tint: '暖调偏柔',
+        advice: backlit ? '逆光人像，建议开启补光或增加曝光补偿' : '标准人像，光线均匀表现佳',
+        lightAdvice: backlit ? '对主体脸部点测光，开启 HDR' : '寻找柔和侧光，避免正午强光',
+      };
 
-      // 更新标签
-      const genderTxt = gender === 'female' ? (age === 'child' ? '👧 女童' : '👩 女性') : (age === 'child' ? '👦 男童' : '👨 男性');
-      document.getElementById('subject-tag').textContent = genderTxt;
-      document.getElementById('subject-tag').classList.remove('hidden');
-      document.getElementById('scene-tag').classList.add('hidden');
+      // 绘制人脸检测框
+      drawFaceBox(face, w, h);
 
-      // 姿势引导（实时绘制）
-      if (S.currentMode === 'portrait' || S.currentMode === 'auto') {
-        drawPoseGuideSVG(gender, S.currentPose);
-      } else {
-        drawFaceBox(face);
-      }
+      // 自动应用人像模式参数
+      applySceneParams(SCENE_PARAMS.portrait);
 
-      setAIState('done', '人像识别 ✓');
     } else {
-      // === 风景场景检测 ===
+      // === 风景/场景检测 ===
       const preds = await S.models.mobilenet.classify(video, 3);
-      if (preds && preds.length > 0) {
-        const scene = mapSceneFromLabel(preds[0].className);
-        S.analysis.scene = scene.label;
-        S.analysis.style = scene.style;
+      const sceneType = detectSceneType(preds, lumSamples);
+      const params = SCENE_PARAMS[sceneType] || SCENE_PARAMS.sunny;
+      const sceneLabel = getSceneLabel(sceneType);
 
-        document.getElementById('scene-tag').textContent = scene.label;
-        document.getElementById('scene-tag').classList.remove('hidden');
-        document.getElementById('subject-tag').classList.add('hidden');
+      S.scene = {
+        type: sceneLabel,
+        subject: '—',
+        light: analyzeLightCondition(lumSamples),
+        quality: analyzeExposureQuality(lumSamples),
+        comp: params.grid,
+        ev: params.ev,
+        tint: params.tint,
+        advice: params.advice,
+        lightAdvice: params.lightAdvice,
+      };
 
-        if (S.currentMode === 'landscape') {
-          S.compMode = scene.comp;
-          drawComposition();
-        }
+      // 自动应用场景参数
+      applySceneParams(params);
 
-        setAIState('done', '场景识别 ✓');
-      }
+      // 绘制构图辅助线
+      drawGrid(params.grid);
     }
 
-    setTimeout(() => { if (!S.aiAnalyzing) setAIState('idle', 'AI 就绪'); }, 1500);
-  } catch (e) { console.warn('分析异常:', e); setAIState('error', '分析异常'); }
-  S.aiAnalyzing = false;
+    // 更新 AI 面板
+    updateAIPanel();
+
+    // 更新直方图
+    if (S.auxMode === 'histogram') {
+      document.getElementById('histogram-container').classList.add('visible');
+      updateHistogram();
+    }
+
+  } catch (e) { console.warn('AI分析失败:', e); }
+  S.analyzing = false;
 }
 
-function mapSceneFromLabel(l) {
-  const s = l.toLowerCase();
-  if (/beach|shore|seashore|coast|sandbar/.test(s)) return SCENE_MAP.beach;
-  if (/forest|wood|woodland|tree|jungle|bosk/.test(s)) return SCENE_MAP.forest;
-  if (/mountain|peak|cliff|valley/.test(s)) return SCENE_MAP.mountain;
-  if (/street|road|alley|sidewalk|avenue/.test(s)) return SCENE_MAP.street;
-  if (/lake|pond|river|stream/.test(s)) return SCENE_MAP.water;
-  if (/park|grass|field|meadow/.test(s)) return SCENE_MAP.park;
-  if (/sky|cloud|atmosphere/.test(s)) return SCENE_MAP.sky;
-  if (/indoor|room|home|house|office|living/.test(s)) return SCENE_MAP.indoor;
-  if (/city|building|skyscraper|downtown/.test(s)) return SCENE_MAP.city;
-  return SCENE_MAP.default;
+// 基于亮度样本分析光照条件
+function analyzeLightCondition(samples) {
+  const { avgL, contrast, stdDev } = samples;
+  if (avgL > 180) return '☀️ 强烈日光';
+  if (avgL > 140) return '🌤️ 明亮户外';
+  if (avgL > 90)  return '⛅ 均匀阴天';
+  if (avgL > 50)  return '💡 室内人工光';
+  if (avgL > 20)  return '🌙 弱光环境';
+  return '🌑 极暗环境';
 }
 
-function drawFaceBox(face) {
-  const w = overlayCV.width, h = overlayCV.height;
-  const vw = video.clientWidth, vh = video.clientHeight;
-  overlayCtx.clearRect(0, 0, w, h);
-  const scaleX = vw / w, scaleY = vh / h;
-  const fx = (w - face.topLeft[0]) * scaleX; // 镜像
-  const fy = face.topLeft[1] * scaleY;
-  const fw = (face.bottomRight[0] - face.topLeft[0]) * scaleX;
-  const fh = (face.bottomRight[1] - face.topLeft[1]) * scaleY;
-  overlayCtx.strokeStyle = '#4ECDC4'; overlayCtx.lineWidth = 2.5;
-  overlayCtx.setLineDash([5, 4]);
-  overlayCtx.strokeRect(fx - fw, fy, fw, fh);
-  overlayCtx.setLineDash([]);
+// 基于直方图分析曝光质量
+function analyzeExposureQuality(samples) {
+  const { avgL, stdDev, shadowRatio, highlightRatio } = samples;
+  if (highlightRatio > 0.25) return '⚠️ 过曝，注意高光溢出';
+  if (shadowRatio > 0.6)     return '⚠️ 欠曝，主体可能过暗';
+  if (stdDev > 80)           return '✓ 高对比场景';
+  if (stdDev > 30)           return '✓ 层次丰富';
+  return '✓ 曝光均匀';
 }
 
-// ========== SVG 姿势引导（嵌入到 pose overlay） ==========
-function drawPoseGuideSVG(gender, pose) {
-  const guide = POSE_GUIDES[gender]?.[pose];
-  if (!guide) return;
+// 检测场景类型（综合 mobilenet 标签 + 亮度）
+function detectSceneType(preds, lumSamples) {
+  const topLabel = preds?.[0]?.className?.toLowerCase() || '';
+  const avgL = lumSamples.avgL;
 
-  poseCtx.clearRect(0, 0, poseCV.width, poseCV.height);
+  if (/night|fireworks|spotlight|candle/.test(topLabel) || avgL < 30) return 'night';
+  if (/beach|shore|seashore/.test(topLabel)) return 'sunny'; // 海边强光
+  if (/forest|wood|woodland|tree|jungle/.test(topLabel)) return 'landscape';
+  if (/mountain|peak|cliff|valley/.test(topLabel)) return 'landscape';
+  if (/street|road|alley/.test(topLabel) && avgL > 60) return 'indoor';
+  if (/sky|cloud|atmosphere/.test(topLabel)) return avgL > 140 ? 'sunny' : 'cloud';
+  if (/indoor|room|home|house|office/.test(topLabel)) return 'indoor';
+  if (/city|building|skyscraper/.test(topLabel)) return avgL > 100 ? 'landscape' : 'night';
+  if (avgL < 50) return 'night';
+  return 'landscape';
+}
 
-  // 渲染 SVG 到 canvas
-  const img = new Image();
-  const svgBlob = new Blob([guide.svg], { type: 'image/svg+xml;charset=utf-8' });
-  const url = URL.createObjectURL(svgBlob);
-  img.onload = () => {
-    const vw = video.clientWidth, vh = video.clientHeight;
-    const scale = Math.min(vw / 200, vh / 400) * 0.75;
-    const x = (vw - 200 * scale) / 2;
-    const y = (vh - 400 * scale) / 2;
-    poseCtx.drawImage(img, x, y, 200 * scale, 400 * scale);
-
-    // 提示文字
-    poseCtx.font = `bold 13px sans-serif`;
-    poseCtx.fillStyle = 'rgba(0,0,0,0.7)';
-    poseCtx.fillRect(x, y + 400 * scale - 28, 200 * scale, 30);
-    poseCtx.fillStyle = '#FFD93D';
-    poseCtx.textAlign = 'center';
-    poseCtx.fillText(guide.tip, x + 100 * scale, y + 400 * scale - 8);
-
-    URL.revokeObjectURL(url);
+function getSceneLabel(type) {
+  const map = {
+    night: '🌙 夜景', landscape: '🏔️ 风景', portrait: '👤 人像',
+    backlit: '🌗 逆光', macro: '🌸 微距', indoor: '🏠 室内',
+    sports: '⚡ 运动', fireworks: '🎆 烟花', cloud: '⛅ 阴天', sunny: '☀️ 晴天',
   };
-  img.src = url;
-
-  // 更新AI面板
-  document.getElementById('ai-subject').textContent =
-    gender === 'female' ? '👩 女性' : gender === 'male' ? '👨 男性' : '👧 儿童';
-  document.getElementById('ai-style').textContent = guide.label;
+  return map[type] || '🏔️ 通用';
 }
 
-// ========== 构图辅助线 ==========
-function drawComposition() {
+// 采样视频帧计算亮度（摄影分区曝光法）
+function sampleLuminance(videoEl, gridN = 20) {
+  const tmp = document.createElement('canvas');
+  tmp.width = 80; tmp.height = 60;
+  const ctx = tmp.getContext('2d');
+  ctx.drawImage(videoEl, 0, 0, 80, 60);
+  const data = ctx.getImageData(0, 0, 80, 60).data;
+
+  let totalL = 0, totalL2 = 0, shadowCount = 0, highlightCount = 0;
+  const pixels = [];
+  for (let i = 0; i < data.length; i += 16) { // 每4像素取1个
+    const l = data[i] * 0.299 + data[i+1] * 0.587 + data[i+2] * 0.114;
+    pixels.push(l);
+    totalL += l;
+    totalL2 += l * l;
+    if (l < 30) shadowCount++;
+    if (l > 220) highlightCount++;
+  }
+  const n = pixels.length;
+  const avgL = totalL / n;
+  const variance = totalL2/n - avgL*avgL;
+  const stdDev = Math.sqrt(variance);
+
+  return {
+    avgL,
+    stdDev,
+    contrast: stdDev / 128,
+    shadowRatio: shadowCount / n,
+    highlightRatio: highlightCount / n,
+    // 计算 EV 值（简化的摄影 EV 公式）
+    ev: Math.log2((avgL / 255) * 4 + 0.1),
+  };
+}
+
+// 自动应用场景参数
+function applySceneParams(params) {
+  if (S.shootMode === 'auto' && params) {
+    S.evComp = params.ev || 0;
+    document.getElementById('ev-slider').value = S.evComp;
+    updateEVDisplay();
+    // 切换构图辅助线
+    if (params.grid && S.gridMode === 'off') {
+      S.gridMode = params.grid;
+    }
+  }
+}
+
+// 更新 AI 分析面板
+function updateAIPanel() {
+  const s = S.scene;
+  document.getElementById('ai-subject').textContent = s.subject || '—';
+  document.getElementById('ai-scene').textContent = s.type || '—';
+  document.getElementById('ai-light').textContent = s.light || '—';
+  document.getElementById('ai-comp').textContent = s.comp ? `📐 ${s.comp.toUpperCase()}` : '—';
+  document.getElementById('ai-ev').textContent = s.ev ? `EV ${s.ev > 0 ? '+' : ''}${s.ev}` : 'EV 0';
+  document.getElementById('ai-tint').textContent = s.tint || '—';
+  document.getElementById('ai-suggestion').textContent = s.advice || '';
+
+  const badge = document.getElementById('scene-badge');
+  badge.textContent = s.type || '';
+  badge.classList.remove('hidden');
+}
+
+// ===== 绘制辅助线 =====
+// 三分法（Rule of Thirds）- 最经典构图法则
+function drawGrid(mode) {
   overlayCtx.clearRect(0, 0, overlayCV.width, overlayCV.height);
   const w = overlayCV.width, h = overlayCV.height;
-  overlayCtx.strokeStyle = 'rgba(255,255,255,0.45)';
-  overlayCtx.lineWidth = 1.2;
+  overlayCtx.strokeStyle = 'rgba(255,255,255,0.4)';
+  overlayCtx.lineWidth = 1;
   overlayCtx.setLineDash([6, 5]);
-  switch (S.compMode) {
+
+  switch (mode) {
     case 'thirds':
       for (let i = 1; i <= 2; i++) {
         overlayCtx.beginPath(); overlayCtx.moveTo(w*i/3,0); overlayCtx.lineTo(w*i/3,h); overlayCtx.stroke();
         overlayCtx.beginPath(); overlayCtx.moveTo(0,h*i/3); overlayCtx.lineTo(w,h*i/3); overlayCtx.stroke();
       }
+      // 高亮四个黄金交叉点
+      const pts = [[w/3,h/3],[w*2/3,h/3],[w/3,h*2/3],[w*2/3,h*2/3]];
+      pts.forEach(p => {
+        overlayCtx.beginPath(); overlayCtx.arc(p[0],p[1],6,0,Math.PI*2);
+        overlayCtx.fillStyle='rgba(255,179,71,0.6)'; overlayCtx.fill();
+      });
       break;
     case 'golden':
       const phi = 0.618;
@@ -542,279 +382,573 @@ function drawComposition() {
       }
       break;
     case 'center':
-      overlayCtx.beginPath(); overlayCtx.arc(w/2,h/2,Math.min(w,h)*0.2,0,Math.PI*2); overlayCtx.stroke();
+      overlayCtx.beginPath(); overlayCtx.arc(w/2,h/2,Math.min(w,h)*0.18,0,Math.PI*2); overlayCtx.stroke();
       overlayCtx.beginPath(); overlayCtx.moveTo(w/2,0); overlayCtx.lineTo(w/2,h); overlayCtx.stroke();
       overlayCtx.beginPath(); overlayCtx.moveTo(0,h/2); overlayCtx.lineTo(w,h/2); overlayCtx.stroke();
       break;
-    case 'diagonal':
+    case 'diag':
       overlayCtx.beginPath(); overlayCtx.moveTo(0,0); overlayCtx.lineTo(w,h); overlayCtx.stroke();
       overlayCtx.beginPath(); overlayCtx.moveTo(w,0); overlayCtx.lineTo(0,h); overlayCtx.stroke();
       overlayCtx.beginPath(); overlayCtx.arc(w/2,h/2,Math.min(w,h)*0.26,0,Math.PI*2); overlayCtx.stroke();
       break;
   }
   overlayCtx.setLineDash([]);
+  S.gridMode = mode;
 }
 
-// ========== 美颜处理（双边滤波） ==========
-function bilateralSmooth(data, w, h, radius) {
-  const src = new Uint8ClampedArray(data);
-  for (let y = radius; y < h - radius; y++) {
-    for (let x = radius; x < w - radius; x++) {
-      const idx = (y*w+x)*4;
-      let r=0,g=0,b=0,sum=0;
-      for (let dy=-radius; dy<=radius; dy++) {
-        for (let dx=-radius; dx<=radius; dx++) {
-          const ni = ((y+dy)*w+(x+dx))*4;
-          const cd = Math.sqrt((src[idx]-src[ni])**2+(src[idx+1]-src[ni+1])**2+(src[idx+2]-src[ni+2])**2);
-          const sd = Math.sqrt(dx*dx+dy*dy)/radius;
-          const wt = Math.exp(-sd*1.5 - cd*0.04);
-          r+=src[ni]*wt; g+=src[ni+1]*wt; b+=src[ni+2]*wt; sum+=wt;
-        }
+// 绘制人脸检测框
+function drawFaceBox(face, w, h) {
+  overlayCtx.clearRect(0, 0, w, h);
+  const vw = video.clientWidth, vh = video.clientHeight;
+  const sx = vw/w, sy = vh/h;
+  // 镜像翻转
+  const fx = (w - face.topLeft[0]) * sx;
+  const fy = face.topLeft[1] * sy;
+  const fw = (face.bottomRight[0] - face.topLeft[0]) * sx;
+  const fh = (face.bottomRight[1] - face.topLeft[1]) * sy;
+
+  overlayCtx.strokeStyle = '#4ECDC4'; overlayCtx.lineWidth = 2;
+  overlayCtx.setLineDash([5,4]);
+  overlayCtx.strokeRect(fx - fw, fy, fw, fh);
+  overlayCtx.setLineDash([]);
+
+  // 人脸区域提示
+  const faceRatio = fw / fh;
+  const gender = faceRatio > 0.76 ? '👩 女性' : '👨 男性';
+  const area = (fw*fh)/(vw*vh);
+  const age = area > 0.12 ? '成人' : area > 0.04 ? '近景' : '全身';
+  overlayCtx.font = 'bold 12px sans-serif';
+  overlayCtx.fillStyle = 'rgba(0,0,0,0.6)';
+  const label = `${gender} · ${age}`;
+  overlayCtx.fillRect(fx - fw + 4, fy + 4, overlayCtx.measureText(label).width + 8, 20);
+  overlayCtx.fillStyle = '#4ECDC4';
+  overlayCtx.fillText(label, fx - fw + 8, fy + 18);
+}
+
+// ===== 实时直方图 =====
+function updateHistogram() {
+  const tmp = document.createElement('canvas');
+  tmp.width = 80; tmp.height = 40;
+  const ctx = tmp.getContext('2d');
+  ctx.drawImage(video, 0, 0, 80, 40);
+  const imgData = ctx.getImageData(0, 0, 80, 40).data;
+
+  // 统计 RGB 三通道 + 亮度直方图
+  const bins = new Array(64).fill(0);
+  for (let i = 0; i < imgData.length; i += 16) {
+    const l = Math.floor((imgData[i]*0.299 + imgData[i+1]*0.587 + imgData[i+2]*0.114) / 4);
+    bins[Math.min(63, l)]++;
+  }
+  const maxBin = Math.max(...bins);
+
+  histCtx.clearRect(0, 0, 80, 40);
+
+  // 亮度直方图
+  bins.forEach((count, i) => {
+    const barH = (count / maxBin) * 35;
+    const hue = i * 2; // 黑色到白色
+    histCtx.fillStyle = `hsl(${hue},60%,55%)`;
+    histCtx.fillRect(i, 40 - barH, 1, barH);
+  });
+
+  // 绘制分区线（阴影/中间调/高光）
+  histCtx.strokeStyle = 'rgba(255,255,255,0.3)';
+  histCtx.lineWidth = 0.5;
+  [16, 48].forEach(x => {
+    histCtx.beginPath(); histCtx.moveTo(x, 0); histCtx.lineTo(x, 40); histCtx.stroke();
+  });
+}
+
+// ===== 斑马纹（Zebra Pattern）=====
+// 模拟专业摄像机的斑马纹功能：标记超过设定阈值的高光区域
+function drawZebraPattern(threshold = 220) {
+  const tmp = document.createElement('canvas');
+  tmp.width = Math.min(320, video.videoWidth); tmp.height = Math.min(240, video.videoHeight);
+  const ctx = tmp.getContext('2d');
+  ctx.drawImage(video, 0, 0, tmp.width, tmp.height);
+  const imgData = ctx.getImageData(0, 0, tmp.width, tmp.height).data;
+  const w = tmp.width, h = tmp.height;
+
+  // 缩小回 overlay
+  const scaleX = overlayCV.width / w, scaleY = overlayCV.height / h;
+  overlayCtx.clearRect(0, 0, overlayCV.width, overlayCV.height);
+
+  for (let y = 0; y < h; y += 3) {
+    for (let x = 0; x < w; x += 3) {
+      const i = (y * w + x) * 4;
+      const luma = imgData[i]*0.299 + imgData[i+1]*0.587 + imgData[i+2]*0.114;
+      if (luma > threshold) {
+        overlayCtx.fillStyle = `rgba(255,0,0,${(luma - threshold) / 35 * 0.35})`;
+        overlayCtx.fillRect(x * scaleX, y * scaleY, 3 * scaleX + 1, 3 * scaleY + 1);
       }
-      data[idx]=r/sum; data[idx+1]=g/sum; data[idx+2]=b/sum;
     }
   }
 }
 
-function applyBeautyAndFilter(canvas) {
-  const ctx = canvas.getContext('2d');
-  const w = canvas.width, h = canvas.height;
-  const imgData = ctx.getImageData(0, 0, w, h);
-  const d = imgData.data;
+// ===== 对焦峰值（Focus Peaking）=====
+// 使用 Sobel 边缘检测突出显示合焦区域
+function drawFocusPeaking(threshold = 30) {
+  const tmp = document.createElement('canvas');
+  tmp.width = Math.min(240, video.videoWidth);
+  tmp.height = Math.min(180, video.videoHeight);
+  const ctx = tmp.getContext('2d');
+  ctx.drawImage(video, 0, 0, tmp.width, tmp.height);
+  const imgData = ctx.getImageData(0, 0, tmp.width, tmp.height);
+  const w = tmp.width, h = tmp.height;
 
-  // 美白
-  if (S.beauty.whiten > 0) {
-    const b = S.beauty.whiten * 0.9;
-    for (let i = 0; i < d.length; i += 4) {
-      d[i]   = Math.min(255, d[i]   + b);
-      d[i+1] = Math.min(255, d[i+1] + b);
-      d[i+2] = Math.min(255, d[i+2] + b);
+  const sx = overlayCV.width / w, sy = overlayCV.height / h;
+  overlayCtx.clearRect(0, 0, overlayCV.width, overlayCV.height);
+
+  const sobel = computeSobelEdges(imgData, w, h);
+  const maxEdge = Math.max(...sobel);
+
+  for (let y = 1; y < h - 1; y += 2) {
+    for (let x = 1; x < w - 1; x += 2) {
+      const v = sobel[y * w + x];
+      if (v > threshold) {
+        const intensity = v / maxEdge;
+        overlayCtx.fillStyle = `rgba(255,50,50,${intensity * 0.7})`;
+        overlayCtx.fillRect(x * sx, y * sy, sx * 3, sy * 3);
+      }
     }
   }
-
-  // 磨皮
-  if (S.beauty.smooth > 20) {
-    bilateralSmooth(d, w, h, Math.round(S.beauty.smooth / 20));
-  }
-
-  ctx.putImageData(imgData, 0, 0);
-
-  // CSS 滤镜（应用到 canvas 显示）
-  const f = FILTERS[S.filter]?.css || 'none';
-  canvas.style.filter = f;
-  return canvas.toDataURL('image/jpeg', 0.95);
 }
 
-// ========== 拍照 ==========
+// Sobel 边缘检测算子
+function computeSobelEdges(imgData, w, h) {
+  const data = imgData.data;
+  const out = new Float32Array(w * h);
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x;
+      const toL = (dy, dx) => {
+        const ni = ((y+dy)*w+(x+dx))*4;
+        return data[ni]*0.299 + data[ni+1]*0.587 + data[ni+2]*0.114;
+      };
+      const gx = -toL(-1,-1) - 2*toL(0,-1) - toL(1,-1) + toL(-1,1) + 2*toL(0,1) + toL(1,1);
+      const gy = -toL(-1,-1) - 2*toL(-1,0) - toL(-1,1) + toL(1,-1) + 2*toL(1,0) + toL(1,1);
+      out[i] = Math.sqrt(gx*gx + gy*gy);
+    }
+  }
+  return out;
+}
+
+// ===== 水平仪（DeviceOrientation）=====
+let lastGamma = 0;
+function startLevel() {
+  if (!window.DeviceOrientationEvent) return;
+  window.addEventListener('deviceorientation', e => {
+    const gamma = e.gamma || 0; // 左右倾斜 -90~90
+    const clamped = Math.max(-30, Math.min(30, gamma));
+    const pct = (clamped / 30) * 100;
+    levelBubble.style.left = `calc(50% - 6px + ${pct * 0.48}px)`;
+    levelBubble.style.background = Math.abs(gamma) < 2 ? '#4ECDC4' : '#FFB347';
+  }, true);
+}
+
+// ===== 触摸对焦 =====
+document.getElementById('camera-container').addEventListener('click', e => {
+  if (S.shootMode === 'video' || S.shootMode === 'pro') {
+    const rect = video.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    showFocusRing(x, y);
+    // 尝试触发对焦（Web API 限制，只能视觉反馈）
+    triggerFocus(x, y);
+  }
+});
+
+function showFocusRing(x, y) {
+  focusRing.style.left = x + 'px';
+  focusRing.style.top = y + 'px';
+  focusRing.classList.remove('hidden');
+  // 重新触发动画
+  focusRing.style.animation = 'none';
+  requestAnimationFrame(() => {
+    focusRing.style.animation = '';
+  });
+  setTimeout(() => focusRing.classList.add('hidden'), 1200);
+}
+
+function triggerFocus(x, y) {
+  // 尝试使用 ImageCapture API 触发对焦
+  const track = S.stream?.getVideoTracks()[0];
+  if (!track) return;
+  try {
+    if ('getCapabilities' in track) {
+      const cap = track.getCapabilities();
+      if (cap.focusMode?.includes('continuous')) {
+        track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
+      }
+    }
+  } catch (e) {}
+}
+
+// ===== 曝光补偿 =====
+function updateEVDisplay() {
+  const ev = S.evComp;
+  document.getElementById('ev-display').textContent = `EV ${ev > 0 ? '+' : ''}${ev}`;
+  // 调整视频亮度（CSS filter 模拟）
+  const brightness = 1 + ev * 0.2;
+  video.style.filter = `brightness(${brightness}) ${FILTERS[S.filter]?.css || 'none'}`;
+}
+document.getElementById('ev-slider').addEventListener('input', e => {
+  S.evComp = parseFloat(e.target.value);
+  updateEVDisplay();
+  // 更新 AI 面板
+  document.getElementById('ai-ev').textContent = `EV ${S.evComp > 0 ? '+' : ''}${S.evComp}`;
+});
+
+// ===== AI 提示 =====
+function showTip(text, duration = 0) {
+  aiTip.textContent = text;
+  aiTip.classList.remove('hidden');
+  aiTip.classList.add('visible');
+  if (duration > 0) setTimeout(hideTip, duration);
+}
+function hideTip() {
+  aiTip.classList.remove('visible');
+  aiTip.classList.add('hidden');
+}
+
+// ===== 专业辅助线渲染器 =====
+function renderAuxMode() {
+  if (S.auxMode === 'zebra') {
+    drawZebraPattern(210);
+  } else if (S.auxMode === 'peaking') {
+    drawFocusPeaking(25);
+  } else if (S.gridMode !== 'off') {
+    drawGrid(S.gridMode);
+  } else {
+    overlayCtx.clearRect(0, 0, overlayCV.width, overlayCV.height);
+  }
+}
+
+// ===== 拍照 =====
 async function capture() {
   const btn = document.getElementById('btn-capture');
   btn.classList.add('shooting');
-  setTimeout(() => btn.classList.remove('shooting'), 600);
+  setTimeout(() => btn.classList.remove('shooting'), 700);
 
-  // 绘制当前滤镜效果到 canvas
   const cv = document.createElement('canvas');
   cv.width = video.videoWidth; cv.height = video.videoHeight;
   const ctx = cv.getContext('2d');
-  // 应用镜像
   ctx.save();
   ctx.translate(cv.width, 0); ctx.scale(-1, 1);
   ctx.drawImage(video, 0, 0);
   ctx.restore();
-  const f = FILTERS[S.filter]?.css || 'none';
-  cv.style.filter = f;
+
+  // 应用滤镜
+  cv.style.filter = FILTERS[S.filter]?.css || 'none';
 
   const origURL = cv.toDataURL('image/jpeg', 0.95);
+  showResult(origURL, true);
+}
 
-  // 显示预览弹窗
+function showResult(origURL, autoBeautify = true) {
   const modal = document.getElementById('result-modal');
   const origImg = document.getElementById('result-original');
   const enhancedCV = document.getElementById('result-enhanced');
   origImg.src = origURL;
+  document.getElementById('result-tag').textContent = autoBeautify ? '✨ AI 美化中...' : '📷 照片已保存';
   document.getElementById('result-actions').classList.add('hidden');
-  document.querySelector('.result-label').textContent = '✨ AI 美化中...';
   modal.classList.remove('hidden');
 
-  // 异步美化
-  setTimeout(() => {
-    enhancedCV.width = cv.width; enhancedCV.height = cv.height;
-    enhancedCV.getContext('2d').drawImage(cv, 0, 0);
-    const beautifiedURL = applyBeautyAndFilter(enhancedCV);
-    document.querySelector('.result-label').textContent = '✅ 美化完成 · ' + (FILTERS[S.filter].label);
-    document.getElementById('result-actions').classList.remove('hidden');
-    enhancedCV.style.cssText = 'display:block;position:absolute;top:0;left:0;width:100%;height:100%;opacity:0;z-index:-1;';
-    enhancedCV.dataset.url = beautifiedURL;
-  }, 800);
+  if (autoBeautify) {
+    setTimeout(() => {
+      enhancedCV.width = cv.width; enhancedCV.height = cv.height;
+      enhancedCV.getContext('2d').drawImage(cv, 0, 0);
+      const url = applyBeauty(enhancedCV);
+      document.getElementById('result-tag').textContent = '✅ 美化完成 · ' + (FILTERS[S.filter]?.label || '原图');
+      document.getElementById('result-actions').classList.remove('hidden');
+      enhancedCV.style.cssText = 'display:block;position:absolute;top:0;left:0;width:100%;height:100%;opacity:0;z-index:-1;';
+      enhancedCV.dataset.url = url;
+    }, 600);
+  }
 }
 
-// ========== 事件绑定 ==========
-
-// 模式切换
-document.querySelectorAll('.mode-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    S.currentMode = btn.dataset.mode;
-    const posePanel = document.getElementById('pose-style-selector');
-    const compPanel = document.getElementById('composition-selector');
-    posePanel.classList.add('hidden'); compPanel.classList.add('hidden');
-    if (S.currentMode === 'portrait') {
-      posePanel.classList.remove('hidden');
-      // 自动检测性别显示姿势
-      if (S.analysis.gender) drawPoseGuideSVG(S.analysis.gender, S.currentPose);
-    } else if (S.currentMode === 'landscape') {
-      compPanel.classList.remove('hidden');
-      drawComposition();
-    } else if (S.currentMode === 'manual') {
-      compPanel.classList.remove('hidden');
+// ===== AI 美颜（双边滤波 + 美白）=====
+function bilateralSmooth(data, w, h, r) {
+  const src = new Uint8ClampedArray(data);
+  for (let y = r; y < h - r; y++) {
+    for (let x = r; x < w - r; x++) {
+      const idx = (y*w+x)*4;
+      let rn=0,gn=0,bn=0,sum=0;
+      for (let dy=-r; dy<=r; dy++) {
+        for (let dx=-r; dx<=r; dx++) {
+          const ni = ((y+dy)*w+(x+dx))*4;
+          const cd = Math.sqrt((src[idx]-src[ni])**2+(src[idx+1]-src[ni+1])**2+(src[idx+2]-src[ni+2])**2);
+          const sd = Math.sqrt(dx*dx+dy*dy)/r;
+          const w2 = Math.exp(-sd*1.5 - cd*0.04);
+          rn+=src[ni]*w2; gn+=src[ni+1]*w2; bn+=src[ni+2]*w2; sum+=w2;
+        }
+      }
+      data[idx]=rn/sum; data[idx+1]=gn/sum; data[idx+2]=bn/sum;
     }
-  });
-});
+  }
+}
 
-// 姿势选择
-document.querySelectorAll('.pose-thumb').forEach(btn => {
+function applyBeauty(canvas) {
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width, h = canvas.height;
+  const imgData = ctx.getImageData(0, 0, w, h);
+  const d = imgData.data;
+  if (S.beauty.whiten > 0) {
+    const b = S.beauty.whiten * 0.85;
+    for (let i = 0; i < d.length; i += 4) {
+      d[i]=Math.min(255,d[i]+b); d[i+1]=Math.min(255,d[i+1]+b); d[i+2]=Math.min(255,d[i+2]+b);
+    }
+  }
+  if (S.beauty.smooth > 20) bilateralSmooth(d, w, h, Math.round(S.beauty.smooth/20));
+  ctx.putImageData(imgData, 0, 0);
+  return canvas.toDataURL('image/jpeg', 0.95);
+}
+
+// ===== 视频录制 =====
+function startRecording() {
+  if (!S.stream) return;
+  const options = { mimeType: 'video/webm;codecs=vp9' };
+  try { S.mediaRecorder = new MediaRecorder(S.stream, options); }
+  catch (e) { S.mediaRecorder = new MediaRecorder(S.stream); }
+
+  S.recordedChunks = [];
+  S.mediaRecorder.ondataavailable = e => { if (e.data.size > 0) S.recordedChunks.push(e.data); };
+  S.mediaRecorder.onstop = () => {
+    const blob = new Blob(S.recordedChunks, { type: 'video/webm' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = `video_${Date.now()}.webm`; a.click();
+    URL.revokeObjectURL(url);
+  };
+  S.mediaRecorder.start(100);
+  S.isRecording = true; S.recordingStart = Date.now();
+  document.getElementById('recording-indicator').classList.remove('hidden');
+  updateRecTime();
+}
+
+function stopRecording() {
+  if (S.mediaRecorder && S.isRecording) {
+    S.mediaRecorder.stop();
+    S.isRecording = false;
+    document.getElementById('recording-indicator').classList.add('hidden');
+  }
+}
+
+function updateRecTime() {
+  if (!S.isRecording) return;
+  const elapsed = Math.floor((Date.now() - S.recordingStart) / 1000);
+  const m = String(Math.floor(elapsed / 60)).padStart(2, '0');
+  const s = String(elapsed % 60).padStart(2, '0');
+  document.getElementById('rec-time').textContent = `${m}:${s}`;
+  setTimeout(updateRecTime, 1000);
+}
+
+// ===== 事件绑定 =====
+
+// 拍摄模式切换
+document.querySelectorAll('.shoot-btn').forEach(btn => {
   btn.addEventListener('click', () => {
-    document.querySelectorAll('.pose-thumb').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.shoot-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
-    S.currentPose = btn.dataset.pose;
-    if (S.analysis.gender) drawPoseGuideSVG(S.analysis.gender, S.currentPose);
-    const g = S.analysis.gender || 'female';
-    document.getElementById('ai-style').textContent = POSE_GUIDES[g][S.currentPose]?.label || '姿势';
+    S.shootMode = btn.dataset.mode;
+
+    const proPanel = document.getElementById('pro-panel');
+    const modeInfo = document.getElementById('btn-mode-info');
+    const captureBtn = document.getElementById('btn-capture');
+    const histContainer = document.getElementById('histogram-container');
+
+    // 重置辅助模式
+    proPanel.classList.add('hidden');
+    histContainer.classList.remove('visible');
+    S.auxMode = 'none';
+    document.getElementById('level-indicator').classList.remove('visible');
+
+    switch (S.shootMode) {
+      case 'auto':
+        modeInfo.textContent = 'AI智能';
+        captureBtn.classList.remove('video-mode');
+        captureBtn.textContent = '●';
+        S.gridMode = 'off';
+        overlayCtx.clearRect(0, 0, overlayCV.width, overlayCV.height);
+        break;
+      case 'portrait':
+        modeInfo.textContent = '人像模式';
+        captureBtn.classList.remove('video-mode');
+        captureBtn.textContent = '●';
+        S.gridMode = 'thirds';
+        drawGrid('thirds');
+        break;
+      case 'landscape':
+        modeInfo.textContent = '风景模式';
+        captureBtn.classList.remove('video-mode');
+        captureBtn.textContent = '●';
+        S.gridMode = 'golden';
+        drawGrid('golden');
+        break;
+      case 'pro':
+        modeInfo.textContent = '专业模式';
+        captureBtn.classList.remove('video-mode');
+        captureBtn.textContent = '●';
+        proPanel.classList.remove('hidden');
+        S.gridMode = 'off';
+        overlayCtx.clearRect(0, 0, overlayCV.width, overlayCV.height);
+        break;
+      case 'video':
+        modeInfo.textContent = '视频模式';
+        captureBtn.classList.add('video-mode');
+        captureBtn.textContent = '●';
+        S.gridMode = 'off';
+        overlayCtx.clearRect(0, 0, overlayCV.width, overlayCV.height);
+        break;
+    }
+    document.getElementById('mode-badge').textContent =
+      { auto: '📷 AI智能', portrait: '👤 人像', landscape: '🏔️ 风景', pro: '⚙️ 专业', video: '🎬 视频' }[S.shootMode] || '📷';
   });
 });
 
-// 构图辅助线
-document.querySelectorAll('.comp-btn').forEach(btn => {
+// 专业参数按钮
+document.querySelectorAll('[data-grid]').forEach(btn => {
   btn.addEventListener('click', () => {
-    document.querySelectorAll('.comp-btn').forEach(b => b.classList.remove('active'));
+    const parent = btn.parentElement;
+    parent.querySelectorAll('.pro-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
-    S.compMode = btn.dataset.comp;
-    drawComposition();
+    const grid = btn.dataset.grid;
+    S.gridMode = grid === 'off' ? 'off' : grid;
+    if (grid === 'off') overlayCtx.clearRect(0, 0, overlayCV.width, overlayCV.height);
+    else drawGrid(grid);
   });
 });
 
-// 美颜滑块
-['smooth','whiten','eyes','slim'].forEach(k => {
-  const input = document.getElementById(k);
-  const valEl = document.getElementById('v-' + k);
-  input.addEventListener('input', () => {
-    S.beauty[k] = parseInt(input.value);
-    if (valEl) valEl.textContent = input.value;
+document.querySelectorAll('[data-aux]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const parent = btn.parentElement;
+    parent.querySelectorAll('.pro-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    S.auxMode = btn.dataset.aux;
+    document.getElementById('level-indicator').classList.toggle('visible', S.auxMode === 'level');
+    document.getElementById('histogram-container').classList.toggle('visible', S.auxMode === 'histogram');
+    if (!['level','histogram'].includes(S.auxMode)) renderAuxMode();
   });
 });
 
-// 滤镜选择（手动模式面板中添加）
-// 底部按钮
-document.getElementById('btn-capture').addEventListener('click', capture);
+document.querySelectorAll('#wb-values .pro-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    btn.parentElement.querySelectorAll('.pro-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    S.wb = btn.dataset.value;
+  });
+});
+
+document.querySelectorAll('#iso-values .pro-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    btn.parentElement.querySelectorAll('.pro-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    S.iso = btn.dataset.value;
+  });
+});
+
+// 底部操作
+document.getElementById('btn-capture').addEventListener('click', () => {
+  if (S.shootMode === 'video') {
+    if (S.isRecording) stopRecording(); else startRecording();
+  } else {
+    capture();
+  }
+});
+
 document.getElementById('btn-switch').addEventListener('click', () => {
   S.facingMode = S.facingMode === 'user' ? 'environment' : 'user';
   initCamera();
 });
+
 document.getElementById('btn-flash').addEventListener('click', () => {
-  const modes = ['off','on'];
+  const modes = ['off', 'on'];
   const idx = modes.indexOf(S.flashMode);
-  S.flashMode = modes[(idx+1)%modes.length];
+  S.flashMode = modes[(idx+1) % modes.length];
   document.getElementById('btn-flash').textContent = S.flashMode === 'on' ? '💡' : '⚡';
   S.stream?.getVideoTracks()[0]?.applyConstraints({ advanced: [{ torch: S.flashMode === 'on' }] }).catch(()=>{});
 });
+
 document.getElementById('btn-gallery').addEventListener('click', () => {
-  const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*';
+  const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*,video/*';
   inp.onchange = e => {
     const f = e.target.files[0]; if (!f) return;
-    const reader = new FileReader();
-    reader.onload = ev => {
-      const modal = document.getElementById('result-modal');
-      document.getElementById('result-original').src = ev.target.result;
-      document.getElementById('result-actions').classList.add('hidden');
-      document.querySelector('.result-label').textContent = '✨ AI 美化中...';
-      modal.classList.remove('hidden');
-      setTimeout(() => {
-        const img = new Image();
-        img.onload = () => {
-          const cv = document.createElement('canvas');
-          cv.width = img.width; cv.height = img.height;
-          cv.getContext('2d').drawImage(img, 0, 0);
-          const enhancedCV = document.getElementById('result-enhanced');
-          enhancedCV.width = cv.width; enhancedCV.height = cv.height;
-          enhancedCV.getContext('2d').drawImage(cv, 0, 0);
-          const url = applyBeautyAndFilter(enhancedCV);
-          document.querySelector('.result-label').textContent = '✅ 美化完成';
-          document.getElementById('result-actions').classList.remove('hidden');
-          enhancedCV.style.cssText = 'display:block;position:absolute;top:0;left:0;width:100%;height:100%;opacity:0;z-index:-1;';
-          enhancedCV.dataset.url = url;
-        };
-        img.src = ev.target.result;
-      }, 500);
-    };
-    reader.readAsDataURL(file);
+    if (f.type.startsWith('video/')) {
+      const url = URL.createObjectURL(f);
+      const a = document.createElement('a'); a.href = url; a.download = f.name; a.click();
+    } else {
+      const reader = new FileReader();
+      reader.onload = ev => showResult(ev.target.result, false);
+      reader.readAsDataURL(f);
+    }
   };
   inp.click();
 });
 
-// 滤镜切换（从 HTML 动态注入按钮）
-function buildFilterBar() {
-  const bar = document.createElement('div');
-  bar.id = 'filter-bar';
-  bar.style.cssText = 'position:absolute;bottom:160px;left:0;right:0;display:flex;gap:8px;justify-content:center;padding:0 12px;z-index:100;flex-wrap:wrap;';
-  Object.entries(FILTERS).forEach(([key, f]) => {
-    const btn = document.createElement('button');
-    btn.className = 'comp-btn' + (key === 'none' ? ' active' : '');
-    btn.dataset.filter = key;
-    btn.textContent = f.label;
-    btn.style.borderColor = key === 'none' ? '' : f.cssColor;
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('[data-filter]').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      S.filter = key;
-      video.style.filter = f.css;
-    });
-    bar.appendChild(btn);
-  });
-  document.getElementById('app').appendChild(bar);
-}
-
 // 结果弹窗
-document.getElementById('btn-download').addEventListener('click', () => {
+document.getElementById('btn-save').addEventListener('click', () => {
   const url = document.getElementById('result-original').src;
-  downloadImage(url, `photo_${Date.now()}_原图.jpg`);
+  downloadFile(url, `photo_${Date.now()}.jpg`);
 });
-document.getElementById('btn-download-beautified').addEventListener('click', () => {
+document.getElementById('btn-save-pro').addEventListener('click', () => {
   const url = document.getElementById('result-enhanced').dataset.url;
-  if (url) downloadImage(url, `photo_${Date.now()}_美化.jpg`);
-  else alert('请等待美化完成');
+  if (url) downloadFile(url, `photo_beauty_${Date.now()}.jpg`);
+});
+document.getElementById('btn-share').addEventListener('click', () => {
+  const url = document.getElementById('result-enhanced').dataset.url || document.getElementById('result-original').src;
+  if (navigator.share) {
+    fetch(url).then(r => r.blob()).then(blob => {
+      const file = new File([blob], 'photo.jpg', { type: 'image/jpeg' });
+      navigator.share({ files: [file], title: 'AI 摄影作品' });
+    });
+  } else {
+    downloadFile(url, `photo_${Date.now()}.jpg`);
+  }
 });
 document.getElementById('btn-retake').addEventListener('click', () => {
   document.getElementById('result-modal').classList.add('hidden');
 });
-document.getElementById('btn-settings').addEventListener('click', () => {
-  const panel = document.getElementById('ai-info-panel');
-  panel.classList.toggle('hidden');
+
+function downloadFile(url, name) {
+  const a = document.createElement('a'); a.href = url; a.download = name; a.click();
+}
+
+// 美颜滑块（通过 AI 面板）
+['smooth','whiten','eyes','slim'].forEach(k => {
+  const el = document.getElementById(k);
+  if (el) el.addEventListener('input', () => {
+    S.beauty[k] = parseInt(el.value);
+    const v = document.getElementById('v-'+k);
+    if (v) v.textContent = el.value;
+  });
 });
 
-function downloadImage(url, name) {
-  const a = document.createElement('a');
-  a.href = url; a.download = name; a.click();
-}
+// 窗口尺寸
+window.addEventListener('resize', resizeOverlay);
 
-// AI 分析主循环
-let frameCount = 0;
+// ===== AI 主循环 =====
 function aiLoop() {
-  if (S.currentMode === 'auto' && S.aiReady) {
+  if (S.shootMode === 'auto' || S.shootMode === 'portrait' || S.shootMode === 'landscape') {
     analyzeScene();
-  } else if (S.currentMode === 'portrait' && S.analysis.gender) {
-    drawPoseGuideSVG(S.analysis.gender, S.currentPose);
-  } else if (S.currentMode === 'landscape') {
-    drawComposition();
   }
-  setTimeout(aiLoop, S.currentMode === 'auto' ? 300 : 1000);
+  if (S.auxMode === 'zebra' || S.auxMode === 'peaking') {
+    renderAuxMode();
+  }
+  if (S.auxMode === 'histogram') {
+    updateHistogram();
+  }
+  // 更新相机信息栏
+  document.getElementById('iso-display').textContent = `ISO ${S.iso === 'auto' ? '—' : S.iso}`;
+
+  setTimeout(aiLoop, S.shootMode === 'auto' ? 400 : 1500);
 }
 
-video.addEventListener('loadedmetadata', resizeOverlays);
-
-// ========== 启动 ==========
+// ===== 启动 =====
 (async () => {
   await initCamera();
-  buildFilterBar();
+  startLevel();
   await loadModels();
   aiLoop();
-  document.getElementById('ai-info-panel').classList.remove('hidden');
+  // 隐藏 AI 提示
+  aiTip.classList.add('hidden');
+  document.getElementById('btn-mode-info').textContent = 'AI智能';
 })();
