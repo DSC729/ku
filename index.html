@@ -3,73 +3,139 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>AI 拍照助手</title>
+  <title>AI 智能摄影助手</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <div id="app">
-    <!-- 顶部工具栏 -->
-    <header id="toolbar">
-      <button id="btn-flash" title="闪光灯">⚡</button>
-      <button id="btn-switch" title="切换摄像头">🔄</button>
-      <button id="btn-settings" title="设置">⚙️</button>
+    <!-- 顶部状态栏 -->
+    <header id="status-bar">
+      <div id="ai-badge" class="ai-badge idle">
+        <span id="ai-icon">🤖</span>
+        <span id="ai-status">AI 待命</span>
+      </div>
+      <div id="scene-tag" class="scene-tag hidden">—</div>
+      <div id="subject-tag" class="subject-tag hidden">—</div>
+      <button id="btn-settings">⚙️</button>
     </header>
 
     <!-- 相机预览区域 -->
     <div id="camera-container">
-      <video id="camera-preview" autoplay playsinline></video>
-      <!-- 构图辅助线叠加层 -->
+      <video id="camera-preview" autoplay playsinline muted></video>
+      <!-- AI 分析结果叠加层 -->
       <canvas id="overlay-canvas"></canvas>
-      <!-- AI 美颜预览滤镜层 -->
-      <canvas id="filter-canvas"></canvas>
+      <!-- 姿势引导模板叠加层 -->
+      <canvas id="pose-overlay"></canvas>
     </div>
 
-    <!-- 构图模式选择 -->
-    <div id="composition-modes">
-      <button class="comp-btn active" data-mode="none">无</button>
-      <button class="comp-btn" data-mode="thirds">三分法</button>
-      <button class="comp-btn" data-mode="golden">黄金比例</button>
-      <button class="comp-btn" data-mode="center">居中</button>
-      <button class="comp-btn" data-mode="diagonal">对角线</button>
+    <!-- AI 分析信息面板 -->
+    <div id="ai-info-panel" class="ai-panel hidden">
+      <div class="ai-info-row">
+        <span class="ai-info-label">🎯 主体</span>
+        <span id="ai-subject" class="ai-info-value">—</span>
+      </div>
+      <div class="ai-info-row">
+        <span class="ai-info-label">🌍 场景</span>
+        <span id="ai-scene" class="ai-info-value">—</span>
+      </div>
+      <div class="ai-info-row">
+        <span class="ai-info-label">📐 推荐风格</span>
+        <span id="ai-style" class="ai-info-value">—</span>
+      </div>
     </div>
 
-    <!-- 美颜调节面板 -->
-    <div id="beauty-panel" class="panel hidden">
-      <div class="slider-group">
-        <label>磨皮 <span id="smooth-val">50</span></label>
-        <input type="range" id="smooth" min="0" max="100" value="50">
+    <!-- 拍摄模式选择 -->
+    <div id="mode-selector">
+      <button class="mode-btn active" data-mode="auto">
+        <span class="mode-icon">🤖</span>
+        <span>AI 智能</span>
+      </button>
+      <button class="mode-btn" data-mode="portrait">
+        <span class="mode-icon">👤</span>
+        <span>人像摄影</span>
+      </button>
+      <button class="mode-btn" data-mode="landscape">
+        <span class="mode-icon">🏔️</span>
+        <span>风景摄影</span>
+      </button>
+      <button class="mode-btn" data-mode="manual">
+        <span class="mode-icon">✋</span>
+        <span>手动调整</span>
+      </button>
+    </div>
+
+    <!-- 姿势风格选择（人像模式显示） -->
+    <div id="pose-style-selector" class="hidden">
+      <p class="pose-hint">👇 请让对方参考以下姿势</p>
+      <div id="pose-gallery">
+        <button class="pose-thumb" data-pose="stand">站姿</button>
+        <button class="pose-thumb" data-pose="sit">坐姿</button>
+        <button class="pose-thumb" data-pose="lean">倚靠</button>
+        <button class="pose-thumb" data-pose="walk">行走</button>
+        <button class="pose-thumb" data-pose="profile">侧颜</button>
       </div>
-      <div class="slider-group">
-        <label>美白 <span id="whiten-val">30</span></label>
-        <input type="range" id="whiten" min="0" max="100" value="30">
+      <div id="pose-preview-container">
+        <canvas id="pose-preview-canvas"></canvas>
       </div>
-      <div class="slider-group">
-        <label>瘦脸 <span id="slim-val">20</span></label>
-        <input type="range" id="slim" min="0" max="100" value="20">
+    </div>
+
+    <!-- 构图辅助线选择（手动模式显示） -->
+    <div id="composition-selector" class="hidden">
+      <div class="comp-row">
+        <button class="comp-btn active" data-comp="none">无</button>
+        <button class="comp-btn" data-comp="thirds">三分法</button>
+        <button class="comp-btn" data-comp="golden">黄金</button>
+        <button class="comp-btn" data-comp="center">居中</button>
+        <button class="comp-btn" data-comp="diagonal">对角</button>
       </div>
-      <div class="slider-group">
-        <label>大眼 <span id="eyes-val">20</span></label>
-        <input type="range" id="eyes" min="0" max="100" value="20">
+      <div class="beauty-sliders">
+        <div class="slider-item">
+          <label>磨皮 <span id="v-smooth">50</span></label>
+          <input type="range" id="smooth" min="0" max="100" value="50">
+        </div>
+        <div class="slider-item">
+          <label>美白 <span id="v-whiten">40</span></label>
+          <input type="range" id="whiten" min="0" max="100" value="40">
+        </div>
+        <div class="slider-item">
+          <label>大眼 <span id="v-eyes">30</span></label>
+          <input type="range" id="eyes" min="0" max="100" value="30">
+        </div>
+        <div class="slider-item">
+          <label>瘦脸 <span id="v-slim">20</span></label>
+          <input type="range" id="slim" min="0" max="100" value="20">
+        </div>
       </div>
     </div>
 
     <!-- 底部操作栏 -->
     <footer id="bottom-bar">
-      <button id="btn-gallery" title="相册">🖼️</button>
-      <button id="btn-capture" title="拍照">●</button>
-      <button id="btn-beauty" title="美颜">✨</button>
+      <button id="btn-gallery">🖼️</button>
+      <button id="btn-capture">●</button>
+      <button id="btn-flash" data-flash="off">⚡</button>
+      <button id="btn-switch">🔄</button>
     </footer>
 
-    <!-- 拍照结果预览 -->
-    <div id="preview-modal" class="hidden">
-      <img id="captured-img" src="" alt="拍照结果">
-      <div class="preview-actions">
-        <button id="btn-save">保存</button>
-        <button id="btn-retake">重拍</button>
+    <!-- AI 拍摄结果预览 + 自动美化 -->
+    <div id="result-modal" class="hidden">
+      <div id="result-header">
+        <span class="result-label">✨ AI 自动美化中...</span>
+      </div>
+      <img id="result-original" src="" alt="原图">
+      <canvas id="result-enhanced" width="0" height="0"></canvas>
+      <div id="result-actions" class="hidden">
+        <button id="btn-download">💾 保存原图</button>
+        <button id="btn-download-beautified">✨ 保存美化版</button>
+        <button id="btn-retake">🔄 重拍</button>
       </div>
     </div>
   </div>
 
+  <!-- TensorFlow.js + 预训练模型 -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface@0.1.0/dist/blazeface.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.0/mobilenet.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@0.0.6/dist/pose-detection.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
