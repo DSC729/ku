@@ -1,0 +1,21 @@
+{
+  "name": "ai-camera",
+  "version": "1.0.0",
+  "description": "AI 摄影大师 - 智能相机",
+  "type": "module",
+  "scripts": {
+    "dev": "npx vite --port 8080",
+    "build": "npx vite build",
+    "cap:sync": "npx cap sync android",
+    "cap:open": "npx cap open android",
+    "cap:build": "npm run build && npx cap sync android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.0.0",
+    "@capacitor/cli": "^7.0.0",
+    "@capacitor/core": "^7.0.0"
+  },
+  "devDependencies": {
+    "vite": "^5.4.0"
+  }
+}

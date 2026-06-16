@@ -2,128 +2,123 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
   <title>AI 摄影大师</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <div id="app">
 
-  <!-- ====== 顶部状态栏 ====== -->
-  <header id="status-bar">
-    <div id="recording-indicator" class="hidden">
-      <span class="rec-dot">●</span><span id="rec-time">00:00</span>
-    </div>
-    <div id="scene-badge" class="hidden">🏷️</div>
-    <div id="mode-badge">🤖 AI智能</div>
-    <div id="settings-btn">⚙️</div>
+  <!-- ====== 顶部栏 ====== -->
+  <header id="top-bar">
+    <div id="scene-badge"></div>
+    <div id="mode-label">🤖 AI智能</div>
+    <div id="ai-status-dot" class="loading"></div>
   </header>
 
-  <!-- ====== 相机预览 ====== -->
-  <div id="camera-container">
-    <video id="camera-preview" autoplay playsinline muted></video>
-    <canvas id="overlay-canvas"></canvas>
+  <!-- ====== 相机区域 ====== -->
+  <div id="camera-wrap">
+    <video id="cam" autoplay playsinline muted></video>
+    <canvas id="render-cv"></canvas>
+    <canvas id="guide-cv"></canvas>
 
-    <!-- 实时参数显示 -->
-    <div id="camera-info-bar">
-      <span id="ev-display">EV 0</span>
-      <span id="iso-display">ISO —</span>
-      <span id="shutter-display">快门 —</span>
+    <!-- 实时参数HUD -->
+    <div id="hud-params">
+      <span id="hud-iso">ISO 100</span>
+      <span id="hud-ape">f/2.8</span>
+      <span id="hud-ss">1/60</span>
+      <span id="hud-ev">EV ±0</span>
+      <span id="hud-wb">5500K</span>
     </div>
 
-    <!-- 实时直方图 -->
-    <div id="histogram-container">
-      <canvas id="histogram-canvas" width="80" height="40"></canvas>
-      <span id="histogram-label">直方图</span>
-    </div>
+    <!-- 直方图 -->
+    <div id="hist-box"><canvas id="hist-cv" width="80" height="40"></canvas></div>
 
-    <!-- 水平仪 -->
-    <div id="level-indicator">
-      <div id="level-line"></div>
-      <div id="level-bubble"></div>
-    </div>
+    <!-- 光线指示 -->
+    <div id="light-indicator"></div>
 
-    <!-- AI 实时提示 -->
-    <div id="ai-tip" class="hidden"></div>
+    <!-- AI提示 -->
+    <div id="ai-toast" class="hidden"></div>
   </div>
 
-  <!-- ====== AI 摄影分析面板 ====== -->
+  <!-- ====== 拍摄模式 ====== -->
+  <nav id="mode-bar">
+    <button class="mbtn active" data-m="auto">🤖<small>AI</small></button>
+    <button class="mbtn" data-m="portrait">👤<small>人像</small></button>
+    <button class="mbtn" data-m="landscape">🏔️<small>风景</small></button>
+    <button class="mbtn" data-m="food">🍽️<small>美食</small></button>
+    <button class="mbtn" data-m="pet">🐾<small>宠物</small></button>
+    <button class="mbtn" data-m="night">🌙<small>夜景</small></button>
+    <button class="mbtn" data-m="pro">⚙️<small>专业</small></button>
+  </nav>
+
+  <!-- ====== AI 分析面板（侧边栏） ====== -->
   <div id="ai-panel">
-    <div class="ai-panel-title">🤖 AI 摄影大师</div>
-    <div id="ai-analysis-content">
-      <div class="ai-row"><span class="ai-key">🎯 主体</span><span id="ai-subject" class="ai-val">—</span></div>
-      <div class="ai-row"><span class="ai-key">🌍 场景</span><span id="ai-scene" class="ai-val">—</span></div>
-      <div class="ai-row"><span class="ai-key">💡 光照</span><span id="ai-light" class="ai-val">—</span></div>
-      <div class="ai-row"><span class="ai-key">📐 构图</span><span id="ai-comp" class="ai-val">—</span></div>
-      <div class="ai-row"><span class="ai-key">⚡ 曝光</span><span id="ai-ev" class="ai-val">—</span></div>
-      <div class="ai-row"><span class="ai-key">🎨 色温</span><span id="ai-tint" class="ai-val">—</span></div>
-      <div id="ai-suggestion" class="ai-suggestion">开启相机，AI 自动分析画面</div>
-    </div>
-
-    <!-- 手动 EV 补偿 -->
-    <div id="ev-comp-panel">
-      <label>手动曝光补偿</label>
-      <input type="range" id="ev-slider" min="-3" max="3" step="0.5" value="0">
-      <div id="ev-ticks"><span>-3</span><span>0</span><span>+3</span></div>
-    </div>
+    <div class="panel-hd">🤖 AI 摄影大脑</div>
+    <div class="arow"><span>🎯 场景</span><span id="p-scene">分析中…</span></div>
+    <div class="arow"><span>📁 子类</span><span id="p-sub">—</span></div>
+    <div class="arow"><span>💡 光线</span><span id="p-light">—</span></div>
+    <div class="arow"><span>📐 构图</span><span id="p-comp">—</span></div>
+    <hr>
+    <div class="arow"><span>⚡ ISO</span><span id="p-iso">100</span></div>
+    <div class="arow"><span>🔵 光圈</span><span id="p-ape">f/2.8</span></div>
+    <div class="arow"><span>⏱ 快门</span><span id="p-ss">1/60</span></div>
+    <div class="arow"><span>🌡 白平衡</span><span id="p-wb">5500K</span></div>
+    <div class="arow"><span>🎨 饱和度</span><span id="p-sat">100%</span></div>
+    <div class="arow"><span>🔪 锐度</span><span id="p-shp">0</span></div>
+    <div class="arow"><span>🌌 景深</span><span id="p-dof">中</span></div>
+    <hr>
+    <div id="p-tip">开启相机开始分析</div>
   </div>
 
-  <!-- ====== 专业参数面板 ====== -->
-  <div id="pro-panel" class="hidden">
-    <div class="pro-section-title">📐 构图辅助</div>
-    <div class="pro-row">
-      <div class="pro-item">
-        <span class="pro-label">网格</span>
-        <div class="pro-values">
-          <button class="pro-btn active" data-grid="off">关</button>
-          <button class="pro-btn" data-grid="thirds">三分</button>
-          <button class="pro-btn" data-grid="golden">黄金</button>
-          <button class="pro-btn" data-grid="center">居中</button>
-          <button class="pro-btn" data-grid="diag">对角</button>
-        </div>
-      </div>
-    </div>
-    <div class="pro-section-title">🛠️ 辅助工具</div>
-    <div class="pro-row">
-      <div class="pro-item">
-        <span class="pro-label">辅助</span>
-        <div class="pro-values">
-          <button class="pro-btn active" data-aux="none">无</button>
-          <button class="pro-btn" data-aux="histogram">直方图</button>
-          <button class="pro-btn" data-aux="level">水平仪</button>
-        </div>
-      </div>
-    </div>
+  <!-- ====== 参数微调面板（拍完后） ====== -->
+  <div id="edit-panel" class="hidden">
+    <div class="panel-hd">🔧 参数微调</div>
+    <div class="eslider"><label>亮度</label><input type="range" id="e-bright" min="-100" max="100" value="0"><span id="e-bright-v">0</span></div>
+    <div class="eslider"><label>对比度</label><input type="range" id="e-contrast" min="-100" max="100" value="0"><span id="e-contrast-v">0</span></div>
+    <div class="eslider"><label>饱和度</label><input type="range" id="e-saturation" min="-100" max="100" value="0"><span id="e-saturation-v">0</span></div>
+    <div class="eslider"><label>色温</label><input type="range" id="e-temp" min="-100" max="100" value="0"><span id="e-temp-v">0</span></div>
+    <div class="eslider"><label>锐度</label><input type="range" id="e-sharp" min="0" max="100" value="0"><span id="e-sharp-v">0</span></div>
+    <div class="eslider"><label>暗角</label><input type="range" id="e-vignette" min="0" max="100" value="0"><span id="e-vignette-v">0</span></div>
+    <div class="eslider"><label>景深模糊</label><input type="range" id="e-bokeh" min="0" max="100" value="0"><span id="e-bokeh-v">0</span></div>
+    <div class="eslider"><label>褪色</label><input type="range" id="e-fade" min="0" max="100" value="0"><span id="e-fade-v">0</span></div>
   </div>
 
-  <!-- ====== 拍摄模式选择 ====== -->
-  <div id="shooting-modes">
-    <button class="shoot-btn active" data-mode="auto"><span class="shoot-icon">🤖</span><span>AI智能</span></button>
-    <button class="shoot-btn" data-mode="portrait"><span class="shoot-icon">👤</span><span>人像</span></button>
-    <button class="shoot-btn" data-mode="landscape"><span class="shoot-icon">🏔️</span><span>风景</span></button>
-    <button class="shoot-btn" data-mode="night"><span class="shoot-icon">🌙</span><span>夜景</span></button>
-    <button class="shoot-btn" data-mode="pro"><span class="shoot-icon">⚙️</span><span>专业</span></button>
+  <!-- ====== AI 抠图面板 ====== -->
+  <div id="cutout-panel" class="hidden">
+    <div class="panel-hd">✂️ AI 抠图</div>
+    <div class="cutout-tools">
+      <button class="cbtn active" id="cut-keep">🔴 保留</button>
+      <button class="cbtn" id="cut-erase">🟢 擦除</button>
+      <button class="cbtn" id="cut-undo">↩️ 撤销</button>
+      <button class="cbtn" id="cut-clear">🗑️ 清除</button>
+      <button class="cbtn" id="cut-finish">✅ 完成</button>
+    </div>
+    <div class="brush-ctrl">
+      <label>画笔大小</label>
+      <input type="range" id="cut-brush" min="5" max="60" value="20">
+      <span id="cut-brush-v">20</span>
+    </div>
+    <canvas id="cutout-cv"></canvas>
   </div>
 
   <!-- ====== 底部操作栏 ====== -->
-  <footer id="bottom-bar">
+  <footer id="bot-bar">
     <button id="btn-gallery">🖼️</button>
-    <button id="btn-capture">●</button>
-    <button id="btn-mode-info">AI智能</button>
+    <button id="btn-shutter">●</button>
     <button id="btn-switch">🔄</button>
     <button id="btn-flash">⚡</button>
   </footer>
 
-  <!-- ====== 预览弹窗 ====== -->
+  <!-- ====== 拍照结果弹窗 ====== -->
   <div id="result-modal" class="hidden">
-    <div id="result-header"><span id="result-tag">📷</span></div>
-    <div id="result-body">
-      <img id="result-original" src="" alt="">
-      <canvas id="result-enhanced" width="0" height="0"></canvas>
-    </div>
-    <div id="result-actions">
-      <button id="btn-save">💾 保存</button>
-      <button id="btn-retake">🔄 重拍</button>
+    <canvas id="result-cv"></canvas>
+    <div id="result-toolbar">
+      <button id="r-beauty" class="rbtn">✨ 一键美颜</button>
+      <button id="r-edit" class="rbtn">🔧 参数微调</button>
+      <button id="r-cutout" class="rbtn">✂️ AI 抠图</button>
+      <button id="r-save" class="rbtn rbtn-primary">💾 保存</button>
+      <button id="r-retake" class="rbtn">🔄 重拍</button>
     </div>
   </div>
 
