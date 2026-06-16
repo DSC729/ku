@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>AI 拍照助手</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- 顶部工具栏 -->
+    <header id="toolbar">
+      <button id="btn-flash" title="闪光灯">⚡</button>
+      <button id="btn-switch" title="切换摄像头">🔄</button>
+      <button id="btn-settings" title="设置">⚙️</button>
+    </header>
+
+    <!-- 相机预览区域 -->
+    <div id="camera-container">
+      <video id="camera-preview" autoplay playsinline></video>
+      <!-- 构图辅助线叠加层 -->
+      <canvas id="overlay-canvas"></canvas>
+      <!-- AI 美颜预览滤镜层 -->
+      <canvas id="filter-canvas"></canvas>
+    </div>
+
+    <!-- 构图模式选择 -->
+    <div id="composition-modes">
+      <button class="comp-btn active" data-mode="none">无</button>
+      <button class="comp-btn" data-mode="thirds">三分法</button>
+      <button class="comp-btn" data-mode="golden">黄金比例</button>
+      <button class="comp-btn" data-mode="center">居中</button>
+      <button class="comp-btn" data-mode="diagonal">对角线</button>
+    </div>
+
+    <!-- 美颜调节面板 -->
+    <div id="beauty-panel" class="panel hidden">
+      <div class="slider-group">
+        <label>磨皮 <span id="smooth-val">50</span></label>
+        <input type="range" id="smooth" min="0" max="100" value="50">
+      </div>
+      <div class="slider-group">
+        <label>美白 <span id="whiten-val">30</span></label>
+        <input type="range" id="whiten" min="0" max="100" value="30">
+      </div>
+      <div class="slider-group">
+        <label>瘦脸 <span id="slim-val">20</span></label>
+        <input type="range" id="slim" min="0" max="100" value="20">
+      </div>
+      <div class="slider-group">
+        <label>大眼 <span id="eyes-val">20</span></label>
+        <input type="range" id="eyes" min="0" max="100" value="20">
+      </div>
+    </div>
+
+    <!-- 底部操作栏 -->
+    <footer id="bottom-bar">
+      <button id="btn-gallery" title="相册">🖼️</button>
+      <button id="btn-capture" title="拍照">●</button>
+      <button id="btn-beauty" title="美颜">✨</button>
+    </footer>
+
+    <!-- 拍照结果预览 -->
+    <div id="preview-modal" class="hidden">
+      <img id="captured-img" src="" alt="拍照结果">
+      <div class="preview-actions">
+        <button id="btn-save">保存</button>
+        <button id="btn-retake">重拍</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
