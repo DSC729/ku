@@ -12,22 +12,19 @@
   <!-- ====== 顶部状态栏 ====== -->
   <header id="status-bar">
     <div id="recording-indicator" class="hidden">
-      <span class="rec-dot">●</span>
-      <span id="rec-time">00:00</span>
+      <span class="rec-dot">●</span><span id="rec-time">00:00</span>
     </div>
-    <div id="scene-badge" class="hidden">🏷️ 智能识别中</div>
-    <div id="mode-badge">📷 拍照</div>
+    <div id="scene-badge" class="hidden">🏷️</div>
+    <div id="mode-badge">🤖 AI智能</div>
     <div id="settings-btn">⚙️</div>
   </header>
 
   <!-- ====== 相机预览 ====== -->
   <div id="camera-container">
     <video id="camera-preview" autoplay playsinline muted></video>
-
-    <!-- 网格/辅助线叠加 -->
     <canvas id="overlay-canvas"></canvas>
 
-    <!-- 相机参数显示（EV/ISO/快门） -->
+    <!-- 实时参数显示 -->
     <div id="camera-info-bar">
       <span id="ev-display">EV 0</span>
       <span id="iso-display">ISO —</span>
@@ -37,69 +34,43 @@
     <!-- 实时直方图 -->
     <div id="histogram-container">
       <canvas id="histogram-canvas" width="80" height="40"></canvas>
-      <span id="histogram-label">曝光</span>
+      <span id="histogram-label">直方图</span>
     </div>
 
     <!-- 水平仪 -->
     <div id="level-indicator">
-      <div id="level-bubble"></div>
       <div id="level-line"></div>
+      <div id="level-bubble"></div>
     </div>
 
-    <!-- AI 分析提示（中央） -->
+    <!-- AI 实时提示 -->
     <div id="ai-tip" class="hidden"></div>
-
-    <!-- 触摸对焦指示 -->
-    <div id="focus-ring" class="hidden"></div>
   </div>
 
-  <!-- ====== AI 智能分析面板（右侧滑出） ====== -->
+  <!-- ====== AI 摄影分析面板 ====== -->
   <div id="ai-panel">
-    <div class="ai-panel-title">🤖 AI 摄影建议</div>
+    <div class="ai-panel-title">🤖 AI 摄影大师</div>
     <div id="ai-analysis-content">
       <div class="ai-row"><span class="ai-key">🎯 主体</span><span id="ai-subject" class="ai-val">—</span></div>
       <div class="ai-row"><span class="ai-key">🌍 场景</span><span id="ai-scene" class="ai-val">—</span></div>
       <div class="ai-row"><span class="ai-key">💡 光照</span><span id="ai-light" class="ai-val">—</span></div>
       <div class="ai-row"><span class="ai-key">📐 构图</span><span id="ai-comp" class="ai-val">—</span></div>
       <div class="ai-row"><span class="ai-key">⚡ 曝光</span><span id="ai-ev" class="ai-val">—</span></div>
-      <div class="ai-row"><span class="ai-key">🎨 色调</span><span id="ai-tint" class="ai-val">—</span></div>
-      <div id="ai-suggestion" class="ai-suggestion">开启相机，让 AI 分析你的画面</div>
+      <div class="ai-row"><span class="ai-key">🎨 色温</span><span id="ai-tint" class="ai-val">—</span></div>
+      <div id="ai-suggestion" class="ai-suggestion">开启相机，AI 自动分析画面</div>
     </div>
 
-    <!-- 曝光补偿滑块 -->
+    <!-- 手动 EV 补偿 -->
     <div id="ev-comp-panel">
-      <label>曝光补偿</label>
+      <label>手动曝光补偿</label>
       <input type="range" id="ev-slider" min="-3" max="3" step="0.5" value="0">
       <div id="ev-ticks"><span>-3</span><span>0</span><span>+3</span></div>
     </div>
   </div>
 
-  <!-- ====== 专业参数面板（底部弹出） ====== -->
+  <!-- ====== 专业参数面板 ====== -->
   <div id="pro-panel" class="hidden">
-    <div class="pro-row">
-      <div class="pro-item">
-        <span class="pro-label">ISO</span>
-        <div class="pro-values" id="iso-values">
-          <button class="pro-btn" data-value="auto">自动</button>
-          <button class="pro-btn" data-value="100">100</button>
-          <button class="pro-btn" data-value="200">200</button>
-          <button class="pro-btn" data-value="400">400</button>
-          <button class="pro-btn" data-value="800">800</button>
-        </div>
-      </div>
-    </div>
-    <div class="pro-row">
-      <div class="pro-item">
-        <span class="pro-label">WB</span>
-        <div class="pro-values" id="wb-values">
-          <button class="pro-btn active" data-value="auto">自动</button>
-          <button class="pro-btn" data-value="cloudy">阴天</button>
-          <button class="pro-btn" data-value="sunny">晴天</button>
-          <button class="pro-btn" data-value="tungsten">白炽灯</button>
-          <button class="pro-btn" data-value="fluorescent">荧光灯</button>
-        </div>
-      </div>
-    </div>
+    <div class="pro-section-title">📐 构图辅助</div>
     <div class="pro-row">
       <div class="pro-item">
         <span class="pro-label">网格</span>
@@ -112,6 +83,7 @@
         </div>
       </div>
     </div>
+    <div class="pro-section-title">🛠️ 辅助工具</div>
     <div class="pro-row">
       <div class="pro-item">
         <span class="pro-label">辅助</span>
@@ -119,61 +91,44 @@
           <button class="pro-btn active" data-aux="none">无</button>
           <button class="pro-btn" data-aux="histogram">直方图</button>
           <button class="pro-btn" data-aux="level">水平仪</button>
-          <button class="pro-btn" data-aux="zebra">斑马纹</button>
-          <button class="pro-btn" data-aux="peaking">对焦峰值</button>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- ====== 拍摄模式选择（底部） ====== -->
+  <!-- ====== 拍摄模式选择 ====== -->
   <div id="shooting-modes">
-    <button class="shoot-btn active" data-mode="auto">
-      <span class="shoot-icon">🤖</span><span>AI智能</span>
-    </button>
-    <button class="shoot-btn" data-mode="portrait">
-      <span class="shoot-icon">👤</span><span>人像</span>
-    </button>
-    <button class="shoot-btn" data-mode="landscape">
-      <span class="shoot-icon">🏔️</span><span>风景</span>
-    </button>
-    <button class="shoot-btn" data-mode="pro">
-      <span class="shoot-icon">⚙️</span><span>专业</span>
-    </button>
-    <button class="shoot-btn" data-mode="video">
-      <span class="shoot-icon">🎬</span><span>视频</span>
-    </button>
+    <button class="shoot-btn active" data-mode="auto"><span class="shoot-icon">🤖</span><span>AI智能</span></button>
+    <button class="shoot-btn" data-mode="portrait"><span class="shoot-icon">👤</span><span>人像</span></button>
+    <button class="shoot-btn" data-mode="landscape"><span class="shoot-icon">🏔️</span><span>风景</span></button>
+    <button class="shoot-btn" data-mode="night"><span class="shoot-icon">🌙</span><span>夜景</span></button>
+    <button class="shoot-btn" data-mode="pro"><span class="shoot-icon">⚙️</span><span>专业</span></button>
   </div>
 
   <!-- ====== 底部操作栏 ====== -->
   <footer id="bottom-bar">
     <button id="btn-gallery">🖼️</button>
     <button id="btn-capture">●</button>
-    <button id="btn-mode-info"></button>
+    <button id="btn-mode-info">AI智能</button>
     <button id="btn-switch">🔄</button>
     <button id="btn-flash">⚡</button>
   </footer>
 
   <!-- ====== 预览弹窗 ====== -->
   <div id="result-modal" class="hidden">
-    <div id="result-header">
-      <span id="result-tag">✨ AI 美化中...</span>
-    </div>
+    <div id="result-header"><span id="result-tag">📷</span></div>
     <div id="result-body">
       <img id="result-original" src="" alt="">
       <canvas id="result-enhanced" width="0" height="0"></canvas>
     </div>
-    <div id="result-actions" class="hidden">
-      <button id="btn-save">💾 原图</button>
-      <button id="btn-save-pro">✨ 美化版</button>
-      <button id="btn-share">📤 分享</button>
+    <div id="result-actions">
+      <button id="btn-save">💾 保存</button>
       <button id="btn-retake">🔄 重拍</button>
     </div>
   </div>
 
 </div>
 
-<!-- TensorFlow.js 模型 -->
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface@0.1.0/dist/blazeface.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.0/mobilenet.min.js"></script>
