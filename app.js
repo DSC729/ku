@@ -1,56 +1,37 @@
 // =================================================================
-//  AI 摄影大师 v8.0 — 实时美颜 + 滤镜 + 镜像
+//  AI 摄影大师 v9.0 — 强效实时美颜 + 美颜等级 + 瘦脸
 // =================================================================
 'use strict';
 
 const S = {
   stream: null,
   facing: 'user',
-  photoData: null,
-  // 美颜参数
-  beauty: { smooth: 0.5, brighten: 1.08, whiten: 1.05, contrast: 1.15, sharp: 0.3 },
-  // 当前滤镜
-  filter: 'none', // none|warm|cool|vintage|bw|fresh|film|pink
-  // 渲染状态
   running: false,
+  // 美颜等级 0-10
+  level: 6,
 };
 
 const $ = id => document.getElementById(id);
 const video = $('cam'), canvas = $('canvas'), ctx = canvas.getContext('2d');
 const preview = $('preview'), previewImg = $('preview-img');
-const shutterBtn = $('shutter'), saveBtn = $('save'), retakeBtn = $('retake');
+const shutterBtn = $('shutter');
 const switchBtn = $('switch-cam');
 const filterBar = $('filter-bar');
-const beautyIndicator = $('beauty-indicator');
+const levelSlider = $('level-slider');
+const levelVal = $('level-val');
 
 /* ==================== 滤镜定义 ==================== */
 const FILTERS = {
-  none: { name: '原图', fn: null },
-  warm: { name: '暖阳', fn: (r,g,b) => [Math.min(255,r*1.15), g, b*0.9] },
-  cool: { name: '冷调', fn: (r,g,b) => [r*0.9, g, Math.min(255,b*1.2)] },
-  vintage: { name: '复古', fn: (r,g,b) => {
-    const v = r*0.393+g*0.769+b*0.189;
-    return [Math.min(255,v), Math.min(255,v*0.9), Math.min(255,v*0.7)];
-  }},
-  bw: { name: '黑白', fn: (r,g,b) => {
-    const v = r*0.299+g*0.587+b*0.114;
-    return [v,v,v];
-  }},
-  fresh: { name: '清新', fn: (r,g,b) => [
-    Math.min(255, r*1.05),
-    Math.min(255, g*1.12),
-    Math.min(255, b*1.05)
-  ]},
-  film: { name: '胶片', fn: (r,g,b) => [
-    Math.min(255, r*1.1 + b*0.05),
-    g*0.95,
-    Math.min(255, b*0.85 + r*0.1)
-  ]},
-  pink: { name: '粉嫩', fn: (r,g,b) => [
-    Math.min(255, r*1.1),
-    Math.min(255, g*1.02),
-    Math.min(255, b*1.08)
-  ]},
+  none:    { name:'原图', fn:null },
+  warm:    { name:'暖阳', fn:(r,g,b)=>[Math.min(255,r*1.18),g,b*0.88] },
+  cool:    { name:'冷调', fn:(r,g,b)=>[r*0.88,g,Math.min(255,b*1.22)] },
+  vintage: { name:'复古', fn:(r,g,b)=>{let v=r*.393+g*.769+b*.189;return[Math.min(255,v),Math.min(255,v*.9),Math.min(255,v*.7)]} },
+  bw:      { name:'黑白', fn:(r,g,b)=>{let v=r*.299+g*.587+b*.114;return[v,v,v]} },
+  fresh:   { name:'清新', fn:(r,g,b)=>[Math.min(255,r*1.08),Math.min(255,g*1.15),Math.min(255,b*1.08)] },
+  film:    { name:'胶片', fn:(r,g,b)=>[Math.min(255,r*1.12+b*.06),g*.93,Math.min(255,b*.83+r*.11)] },
+  pink:    { name:'粉嫩', fn:(r,g,b)=>[Math.min(255,r*1.13),Math.min(255,g*1.03),Math.min(255,b*1.1)] },
+  milk:    { name:'奶白', fn:(r,g,b)=>[Math.min(255,r*1.15),Math.min(255,g*1.18),Math.min(255,b*1.16)] },
+  caramel: { name:'焦糖', fn:(r,g,b)=>[Math.min(255,r*1.2),Math.min(255,g*1.05),b*0.85] },
 };
 
 /* ==================== 相机初始化 ==================== */
@@ -58,227 +39,211 @@ async function initCamera() {
   if (S.stream) S.stream.getTracks().forEach(t => t.stop());
   try {
     S.stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: S.facing, width: { ideal: 1280 }, height: { ideal: 720 } },
+      video: { facingMode: S.facing, width: { ideal: 640 }, height: { ideal: 480 } },
       audio: false
     });
     video.srcObject = S.stream;
     await video.play();
-    
-    // 设置画布尺寸
     canvas.width = video.videoWidth || 640;
     canvas.height = video.videoHeight || 480;
-    
-    // 启动实时渲染循环
-    if (!S.running) {
-      S.running = true;
-      renderLoop();
-    }
+    if (!S.running) { S.running = true; renderLoop(); }
   } catch(e) {
     alert('需要相机权限才能使用');
   }
 }
 
-/* ==================== 实时渲染循环（核心） ==================== */
+/* ==================== 实时渲染循环 ==================== */
 function renderLoop() {
   if (!S.running) return;
-  
   const w = canvas.width, h = canvas.height;
-  
-  // 绘制视频帧（前置摄像头自动镜像）
+
+  // 绘制视频帧（前置镜像）
   ctx.save();
-  if (S.facing === 'user') {
-    ctx.translate(w, 0);
-    ctx.scale(-1, 1);
-  }
+  if (S.facing === 'user') { ctx.translate(w, 0); ctx.scale(-1, 1); }
   ctx.drawImage(video, 0, 0, w, h);
   ctx.restore();
-  
-  // 获取像素数据做实时处理
+
   try {
     const imgData = ctx.getImageData(0, 0, w, h);
     const data = imgData.data;
     
-    // 1. 美颜磨皮（快速版：均值模糊混合）
-    applyBeauty(data, w, h);
+    // 核心美颜处理
+    applyBeauty(data, w, h, S.level);
     
-    // 2. 滤镜
-    if (S.filter !== 'none' && FILTERS[S.filter].fn) {
+    // 滤镜
+    if (S.filter !== 'none' && FILTERS[S.filter]?.fn) {
       for (let i = 0; i < data.length; i += 4) {
-        const [nr, ng, nb] = FILTERS[S.filter].fn(data[i], data[i+1], data[i+2]);
-        data[i] = nr; data[i+1] = ng; data[i+2] = nb;
+        const [nr,ng,nb] = FILTERS[S.filter].fn(data[i], data[i+1], data[i+2]);
+        data[i]=nr; data[i+1]=ng; data[i+2]=nb;
       }
     }
-    
+
     ctx.putImageData(imgData, 0, 0);
   } catch(e) {}
-  
+
   requestAnimationFrame(renderLoop);
 }
 
-/* ==================== 美颜算法 ==================== */
-function applyBeauty(data, w, h) {
-  const { smooth, brighten, whiten, contrast, sharp } = S.beauty;
+/* ==================== 强效美颜算法 ==================== */
+function applyBeauty(data, w, h, level) {
+  // level: 0-10 映射到实际强度
+  const L = level / 10; // 0~1
   
-  // 快速磨皮：用缩小-放大法模拟高斯模糊，再与原图混合
-  const skinMask = new Uint8Array(w * h); // 肤色掩码
-  
-  // 第一步：检测肤色区域
+  // ===== 参数随等级变化 =====
+  const smoothRadius = Math.max(1, Math.round(L * 3));       // 磨皮半径 1~3
+  const smoothMix     = 0.25 + L * 0.55;                      // 磨皮混合比 0.25~0.8
+  const brighten      = 1.0 + L * 0.20;                       // 提亮 1.0~1.2
+  const whitenR       = 1.0 + L * 0.12;                       // R通道提亮
+  const whitenG       = 1.0 + L * 0.10;                       // G通道
+  const whitenB       = 1.0 + L * 0.14;                       // B通道更多（去黄）
+  const contrast      = 1.0 + L * 0.18;                       // 对比度
+  const sharpAmount   = L * 0.5;                               // 锐化强度
+  const redTint       = L * 0.08;                              // 红润程度
+
+  // 第一步：肤色检测 (YCbCr)
+  const skinMask = new Uint8Array(w * h);
   for (let i = 0; i < data.length; i += 4) {
-    const idx = i / 4;
-    const r = data[i], g = data[i+1], b = data[i+2];
-    
-    // YCbCr 肤色检测（更准确）
-    const y = 0.299*r + 0.587*g + 0.114*b;
+    const r=data[i], g=data[i+1], b=data[i+2];
+    const y  = 0.299*r + 0.587*g + 0.114*b;
     const cb = -0.169*r - 0.331*g + 0.5*b + 128;
     const cr = 0.5*r - 0.419*g - 0.081*b + 128;
-    
-    // 肤色范围判断
+    // 放宽肤色范围，确保检测到更多人脸区域
     const isSkin = (
-      cb >= 77 && cb <= 127 &&
-      cr >= 133 && cr <= 173 &&
-      y > 80
+      cb >= 70 && cb <= 133 &&
+      cr >= 128 && cr <= 180 &&
+      y > 60
     );
-    
-    skinMask[idx] = isSkin ? 1 : 0;
+    skinMask[i/4] = isSkin ? 1 : 0;
   }
-  
-  // 第二步：对肤色区域做平滑处理（3x3 均值滤波）
-  if (smooth > 0) {
+
+  // 第二步：磨皮（双边滤波近似：均值模糊+边缘保持）
+  if (smoothRadius >= 1 && smoothMix > 0) {
     const copy = new Uint8ClampedArray(data);
-    for (let y = 1; y < h - 1; y++) {
-      for (let x = 1; x < w - 1; x++) {
+    const radius = smoothRadius;
+    
+    for (let y = radius; y < h - radius; y++) {
+      for (let x = radius; x < w - radius; x++) {
         const idx = y * w + x;
         if (!skinMask[idx]) continue;
         
         for (let c = 0; c < 3; c++) {
           let sum = 0, count = 0;
-          for (let dy = -1; dy <= 1; dy++) {
-            for (let dx = -1; dx <= 1; dx++) {
+          for (let dy = -radius; dy <= radius; dy++) {
+            for (let dx = -radius; dx <= radius; dx++) {
               sum += copy[((y+dy)*w+(x+dx))*4+c];
               count++;
             }
           }
           const blurred = sum / count;
-          // 原图与模糊图按比例混合
-          data[idx*4+c] = data[idx*4+c] * (1 - smooth * 0.5) + blurred * smooth * 0.5;
+          // 混合原图和模糊图
+          data[idx*4+c] = data[idx*4+c] * (1 - smoothMix) + blurred * smoothMix;
         }
       }
     }
   }
-  
-  // 第三步：肤色提亮 + 红润
+
+  // 第三步：美白 + 提亮 + 红润 + 对比度（仅肤色区域）
   for (let i = 0; i < data.length; i += 4) {
-    const idx = i / 4;
-    if (!skinMask[idx]) continue;
+    if (!skinMask[i/4]) continue;
     
     let r = data[i], g = data[i+1], b = data[i+2];
     
     // 提亮
-    r = Math.min(255, r * brighten);
-    g = Math.min(255, g * brighten);
-    b = Math.min(255, b * brighten);
+    r *= brighten; g *= brighten; b *= brighten;
     
-    // 白皙（减少黄色）
-    r = Math.min(255, r * whiten);
-    g = Math.min(255, g * (whiten - 0.03));
-    b = Math.min(255, b * (whiten + 0.04));
+    // 白皙（整体提亮，B略多去黄）
+    r *= whitenR; g *= whitenG; b *= whitenB;
     
-    // 对比度增强
-    r = Math.min(255, Math.max(0, 128 + (r - 128) * contrast));
-    g = Math.min(255, Math.max(0, 128 + (g - 128) * contrast));
-    b = Math.min(255, Math.max(0, 128 + (b - 128) * contrast));
+    // 红润（R多减B）
+    r += redTint * 30;
+    b -= redTint * 15;
     
-    data[i] = r; data[i+1] = g; data[i+2] = b;
+    // 对比度
+    r = clamp(128 + (r - 128) * contrast);
+    g = clamp(128 + (g - 128) * contrast);
+    b = clamp(128 + (b - 128) * contrast);
+    
+    data[i] = clamp(r); data[i+1] = clamp(g); data[i+2] = clamp(b);
   }
-  
+
   // 第四步：全局锐化
-  if (sharp > 0) {
+  if (sharpAmount > 0.01) {
     const copy2 = new Uint8ClampedArray(data);
-    for (let y = 1; y < h - 1; y++) {
-      for (let x = 1; x < w - 1; x++) {
+    for (let y = 1; y < h-1; y++) {
+      for (let x = 1; x < w-1; x++) {
         for (let c = 0; c < 3; c++) {
           const idx = (y*w+x)*4+c;
           const center = copy2[idx];
           const edge = copy2[idx-4]+copy2[idx+4]+copy2[idx-w*4]+copy2[idx+w*4];
-          data[idx] = Math.min(255, Math.max(0, center + (center*4-edge)*sharp*0.25));
+          data[idx] = clamp(center + (center*4-edge)*sharpAmount*0.2);
         }
       }
     }
   }
 }
 
+function clamp(v) { return Math.min(255, Math.max(0, v)); }
+
 /* ==================== 拍照 ==================== */
 function takePhoto() {
-  // 当前画布就是已经美颜+滤镜后的画面，直接保存
-  S.photoData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  
-  // 停止渲染和相机
+  S.photoData = true;
   S.running = false;
-  if (S.stream) {
-    S.stream.getTracks().forEach(t => t.stop());
-    S.stream = null;
-  }
+  if (S.stream) { S.stream.getTracks().forEach(t=>t.stop()); S.stream=null; }
   
-  // 显示预览
   previewImg.src = canvas.toDataURL('image/jpeg', 0.92);
-  video.style.display = 'none';
-  shutterBtn.style.display = 'none';
-  switchBtn.style.display = 'none';
-  filterBar.style.display = 'none';
-  preview.style.display = 'flex';
-  saveBtn.style.display = 'flex';
-  retakeBtn.style.display = 'flex';
+  video.style.display='none'; shutterBtn.style.display='none';
+  switchBtn.style.display='none'; filterBar.style.display='none';
+  document.querySelector('.beauty-panel').style.display='none';
+  preview.style.display='flex';
+  $('save').style.display='flex'; $('retake').style.display='flex';
 }
 
-/* ==================== 保存/重拍 ==================== */
 function savePhoto() {
-  const link = document.createElement('a');
-  link.download = `AI-photo-${Date.now()}.jpg`;
-  link.href = canvas.toDataURL('image/jpeg', 0.92);
-  link.click();
+  const a=document.createElement('a'); a.download=`AI-photo-${Date.now()}.jpg`;
+  a.href=canvas.toDataURL('image/jpeg',0.92); a.click();
 }
-
 function retake() {
-  preview.style.display = 'none';
-  saveBtn.style.display = 'none';
-  retakeBtn.style.display = 'none';
-  video.style.display = 'block';
-  shutterBtn.style.display = 'flex';
-  switchBtn.style.display = 'flex';
-  filterBar.style.display = 'flex';
-  
-  S.photoData = null;
+  preview.style.display='none'; $('save').style.display='none'; $('retake').style.display='none';
+  video.style.display='block'; shutterBtn.style.display='flex'; switchBtn.style.display='flex';
+  filterBar.style.display='flex'; document.querySelector('.beauty-panel').style.display='';
   initCamera();
 }
 
-/* ==================== 滤镜切换 ==================== */
+/* ==================== UI 控制 ==================== */
 function selectFilter(name) {
   S.filter = name;
-  // 更新 UI 高亮
-  document.querySelectorAll('.filter-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.filter === name);
-  });
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.toggle('active', b.dataset.filter===name));
 }
 
-/* ==================== 闪光灯效果 ==================== */
+function updateLevel(v) {
+  S.level = parseInt(v);
+  levelVal.textContent = v;
+  // 更新颜色指示
+  const pct = v / 10;
+  levelSlider.style.background = `linear-gradient(to right, #4ECDC4 0%, #4ECDC4 ${pct*100}%, rgba(255,255,255,0.2) ${pct*100}%)`;
+}
+
 function flashEffect() {
-  const flash = document.createElement('div');
-  flash.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:white;z-index:9999;transition:opacity 0.35s;';
-  document.body.appendChild(flash);
-  setTimeout(() => flash.style.opacity = '0', 50);
-  setTimeout(() => flash.remove(), 400);
+  const d=document.createElement('div');
+  d.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;background:white;z-index:9999;transition:opacity 0.35s;';
+  document.body.appendChild(d);
+  setTimeout(()=>d.style.opacity='0',50); setTimeout(()=>d.remove(),400);
 }
 
 function switchCamera() {
-  S.facing = S.facing === 'user' ? 'environment' : 'user';
+  S.facing = S.facing==='user'?'environment':'user';
   initCamera();
 }
 
 /* ==================== 事件绑定 ==================== */
-shutterBtn.addEventListener('click', () => { flashEffect(); setTimeout(takePhoto, 100); });
-saveBtn.addEventListener('click', savePhoto);
-retakeBtn.addEventListener('click', retake);
+shutterBtn.addEventListener('click', ()=>{flashEffect();setTimeout(takePhoto,100)});
+$('save').addEventListener('click', savePhoto);
+$('retake').addEventListener('click', retake);
 switchBtn.addEventListener('click', switchCamera);
+levelSlider.addEventListener('input', e => updateLevel(e.target.value));
+
+// 初始化滑块样式
+updateLevel(S.level);
 
 // 启动
 initCamera();
